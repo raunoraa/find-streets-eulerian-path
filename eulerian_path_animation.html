@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+    
+    <style>html, body {width: 100%;height: 100%;margin: 0;padding: 0;}</style>
+    <style>#map {position:absolute;top:0;bottom:0;right:0;left:0;}</style>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_225a4c1a5a43c18882bb4d4901c25568 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+        
+</head>
+<body>
+    
+    
+    <script>
+    window.onload = function() {        
+
+        let animation;
+        let currentStep = 0;
+        let prevStep = 0;
+        let playing = false;
+                                
+        let infoText = document.getElementById('info-text');
+                                
+        let polylines = document.querySelectorAll(".leaflet-interactive");
+        let prev_polyline = null;
+
+        let delay = 500;  // 500 ms delay between segments
+        const delaySlider = document.getElementById('delay-slider');
+        const delayValueDisplay = document.getElementById('delay-value');
+                                
+        const stepSlider = document.getElementById('step-slider');
+        stepSlider.max = polylines.length;
+        const stepValueDisplay = document.getElementById('step-value');
+
+        // Update the delay when slider is changed
+        delaySlider.oninput = function() {
+            delay = this.value;
+            delayValueDisplay.textContent = `${delay} ms`;  // Update the display
+        };               
+
+        stepSlider.oninput = function() {
+            prevStep = currentStep;
+            currentStep = this.value;
+            stepValueDisplay.textContent = `${currentStep}`;  // Update the display
+            animateStep();
+        }                  
+
+        function animatePath() {
+            if (!playing) return;  // Only animate when playing is true
+            if (currentStep >= polylines.length) {
+                infoText.textContent = "Finished!";
+                return;
+            }  // Stop when the end is reached                                                        
+
+            if (prev_polyline) {
+                prev_polyline.style.stroke = "blue";
+            }
+
+            let polyline = polylines[currentStep];
+            if (polyline) {
+                polyline.style["stroke-opacity"] = 1;  // Show the polyline
+                polyline.style.stroke = "black";
+                prev_polyline = polyline;
+            }
+            currentStep++;
+            
+            stepSlider.value = currentStep;
+            stepValueDisplay.textContent = `${currentStep}`;  // Update the display                                
+            
+            animation = setTimeout(animatePath, delay);
+        }
+                                
+        function animateStep(){
+            if(playing) return; // Only let it animate the step, when it is not auto-playing.
+            //if(currentStep >= polylines.length) {
+                //infoText.textContent = "Finished!";
+                //return;
+            //}  // Stop here when the end is reached   
+            console.log(prevStep + " " + currentStep)  ;
+                                
+            if (prev_polyline) {
+                
+                if (prevStep > currentStep) {
+                    for (let i = prevStep; i > prevStep - currentStep; i--) {
+                        polylines[i].style["stroke-opacity"] = 0;
+                    }
+                    //prev_polyline.style["stroke-opacity"] = 0;
+                } else 
+                {                                
+                    prev_polyline.style.stroke = "blue";
+                }
+            }
+
+            if (currentStep - prevStep >= 1){
+                prev_polyline.style.stroke = "blue";
+                for (let i = prevStep; i < currentStep; i++) {                        
+                        polylines[i].style["stroke-opacity"] = 1;
+                        polylines[i].style.stroke = "black";
+                        prev_polyline = polylines[i];
+                }
+            }
+
+            else{
+                let polyline = polylines[currentStep];
+                if (polyline) {
+                    polyline.style["stroke-opacity"] = 1;  // Show the polyline
+                    polyline.style.stroke = "black";
+                    prev_polyline = polyline;
+                }    
+            }                
+        }
+
+        function playAnimation() {
+            if (currentStep < polylines.length) {
+                playing = true;
+                infoText.textContent = "Playing..."            
+                animatePath();
+            }
+        }
+
+        function pauseAnimation() {
+            playing = false;
+            infoText.textContent = "Paused"
+            clearTimeout(animation);
+        }
+
+        function resetAnimation() {
+            playing = false;
+            currentStep = 0;
+            clearTimeout(animation);            
+            resetAll();
+        }
+
+        function resetAll() {
+            infoText.textContent = "Ready!";
+            prev_polyline = null;
+            polylines = document.querySelectorAll(".leaflet-interactive");
+            polylines.forEach(el => {
+                el.style["stroke-opacity"] = 0;
+            });
+        }
+
+        document.getElementById('play-button').onclick = function() { playAnimation(); };
+        document.getElementById('pause-button').onclick = function() { pauseAnimation(); };
+        document.getElementById('restart-button').onclick = function() { resetAnimation(); playAnimation(); };
+    };
+    </script>
+    
+    
+        <div style="position: fixed; bottom: 60px; left: 50px; z-index: 9999;">
+
+            <p id="info-text">Ready!</p>
+
+            <button id="play-button" style="padding: 10px; margin-right: 10px;">Play</button>
+            <button id="pause-button" style="padding: 10px; margin-right: 10px;">Pause</button>
+            <button id="restart-button" style="padding: 10px;">Restart</button>
+
+            <!-- Add slider to control delay -->
+            <div style="margin-top: 20px;">
+                <label for="delay-slider">Animation Delay (ms):</label>
+                <input type="range" id="delay-slider" min="100" max="2000" value="500" step="100" style="margin-left: 10px;">
+                <span id="delay-value">500 ms</span>
+            </div>
+
+            <!-- Add slider to control steps -->
+            <div style="margin-top: 20px;">
+                <label for="step-slider">Steps:</label>
+                <input type="range" id="step-slider" min="0" max="1" value="0" step="1" style="margin-left: 10px;">
+                <span id="step-value">0</span>
+            </div>
+        </div>        
+    
+    
+            <div class="folium-map" id="map_225a4c1a5a43c18882bb4d4901c25568" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_225a4c1a5a43c18882bb4d4901c25568 = L.map(
+                "map_225a4c1a5a43c18882bb4d4901c25568",
+                {
+                    center: [58.3464757, 26.7216969],
+                    crs: L.CRS.EPSG3857,
+                    zoom: 15,
+                    zoomControl: true,
+                    preferCanvas: false,
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_935999b4f0609f805a8de259d2a94f68 = L.tileLayer(
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {"attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 19, "minZoom": 0, "noWrap": false, "opacity": 1, "subdomains": "abc", "tms": false}
+            );
+        
+    
+            tile_layer_935999b4f0609f805a8de259d2a94f68.addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            var poly_line_5fde771f2dbdc243590394ff46c95290 = L.polyline(
+                [[58.3459278, 26.7235447], [58.346909, 26.723552]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_5fde771f2dbdc243590394ff46c95290.bindTooltip(
+                `<div>
+                     Order: 1<br>Street: Jalaka<br>Length: 109.16 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_14fc3d56973cadd80bce6fade6ee4755 = L.polyline(
+                [[58.346909, 26.723552], [58.347289, 26.723509]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_14fc3d56973cadd80bce6fade6ee4755.bindTooltip(
+                `<div>
+                     Order: 2<br>Street: Jalaka<br>Length: 42.33 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_8c1820842757cb063d34e464ca8197bc = L.polyline(
+                [[58.347289, 26.723509], [58.3500945, 26.723271]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_8c1820842757cb063d34e464ca8197bc.bindTooltip(
+                `<div>
+                     Order: 3<br>Street: Jalaka<br>Length: 312.28 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_2cd06e86cdf5881f59b4eb3c2c49ab1a = L.polyline(
+                [[58.3500945, 26.723271], [58.347289, 26.723509]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_2cd06e86cdf5881f59b4eb3c2c49ab1a.bindTooltip(
+                `<div>
+                     Order: 4<br>Street: Jalaka<br>Length: 312.28 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_831d6f2f1acac1d5263a27063ea9aa0c = L.polyline(
+                [[58.347289, 26.723509], [58.347279, 26.721818]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_831d6f2f1acac1d5263a27063ea9aa0c.bindTooltip(
+                `<div>
+                     Order: 5<br>Street: Alasi<br>Length: 98.68 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_a7550fb6e2022f002ceb0d6c4a7b374b = L.polyline(
+                [[58.347279, 26.721818], [58.3489953, 26.7220113]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_a7550fb6e2022f002ceb0d6c4a7b374b.bindTooltip(
+                `<div>
+                     Order: 6<br>Street: Kolde<br>Length: 194.07 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_8a31a7a470009609b409ced4784268a2 = L.polyline(
+                [[58.3489953, 26.7220113], [58.347279, 26.721818]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_8a31a7a470009609b409ced4784268a2.bindTooltip(
+                `<div>
+                     Order: 7<br>Street: Kolde<br>Length: 194.07 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_dd25d5cfcedf808e2212a6d09a79efa9 = L.polyline(
+                [[58.347279, 26.721818], [58.34587, 26.721888]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_dd25d5cfcedf808e2212a6d09a79efa9.bindTooltip(
+                `<div>
+                     Order: 8<br>Street: Kolde<br>Length: 156.73 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_d75d6d4d3c02fa9459ad429c6fb977f3 = L.polyline(
+                [[58.34587, 26.721888], [58.345874, 26.720197]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_d75d6d4d3c02fa9459ad429c6fb977f3.bindTooltip(
+                `<div>
+                     Order: 9<br>Street: Sepikoja<br>Length: 98.68 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_f0473f2d70d21b6f9ea2c9f29ced3b9c = L.polyline(
+                [[58.345874, 26.720197], [58.34588, 26.718438]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_f0473f2d70d21b6f9ea2c9f29ced3b9c.bindTooltip(
+                `<div>
+                     Order: 10<br>Street: Sepikoja<br>Length: 102.65 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_d82ac6462d8ac632d41f7ecaa3fbd8c9 = L.polyline(
+                [[58.34588, 26.718438], [58.346169, 26.717515]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_d82ac6462d8ac632d41f7ecaa3fbd8c9.bindTooltip(
+                `<div>
+                     Order: 11<br>Street: Sepikoja<br>Length: 91.23 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_0dcd0a06893af483ec6cf8a9f762e8f9 = L.polyline(
+                [[58.346169, 26.717515], [58.34588, 26.718438]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_0dcd0a06893af483ec6cf8a9f762e8f9.bindTooltip(
+                `<div>
+                     Order: 12<br>Street: Sepikoja<br>Length: 91.23 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_a060a41df56e1d65e406660dcdcfca5f = L.polyline(
+                [[58.34588, 26.718438], [58.3463551, 26.7187676]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_a060a41df56e1d65e406660dcdcfca5f.bindTooltip(
+                `<div>
+                     Order: 13<br>Street: Sepakuru<br>Length: 56.22 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_f19ace8bd31944d872347e5d7f5084d9 = L.polyline(
+                [[58.3463551, 26.7187676], [58.346733, 26.717151]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_f19ace8bd31944d872347e5d7f5084d9.bindTooltip(
+                `<div>
+                     Order: 14<br>Street: Unknown Street<br>Length: 103.27 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_6db3e9f7a33075f4ded606097969f49e = L.polyline(
+                [[58.346733, 26.717151], [58.3463551, 26.7187676]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_6db3e9f7a33075f4ded606097969f49e.bindTooltip(
+                `<div>
+                     Order: 15<br>Street: Unknown Street<br>Length: 103.27 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_dcf2120109829a4be5b170367e538ee0 = L.polyline(
+                [[58.3463551, 26.7187676], [58.34588, 26.718438]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_dcf2120109829a4be5b170367e538ee0.bindTooltip(
+                `<div>
+                     Order: 16<br>Street: Sepakuru<br>Length: 56.22 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_2fd3fa0acf4fb1caf768b1a02ed21e71 = L.polyline(
+                [[58.34588, 26.718438], [58.345874, 26.720197]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_2fd3fa0acf4fb1caf768b1a02ed21e71.bindTooltip(
+                `<div>
+                     Order: 17<br>Street: Sepikoja<br>Length: 102.65 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_e07ad1abb4977708ff82c5e344880524 = L.polyline(
+                [[58.345874, 26.720197], [58.347271, 26.720511]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_e07ad1abb4977708ff82c5e344880524.bindTooltip(
+                `<div>
+                     Order: 18<br>Street: Ääsi<br>Length: 156.42 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_4a97531246fca360498f1c74570a17f8 = L.polyline(
+                [[58.347271, 26.720511], [58.345874, 26.720197]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_4a97531246fca360498f1c74570a17f8.bindTooltip(
+                `<div>
+                     Order: 19<br>Street: Ääsi<br>Length: 156.42 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_d42e93fcf5ae7fae3c2b34aefbccc3e9 = L.polyline(
+                [[58.345874, 26.720197], [58.34587, 26.721888]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_d42e93fcf5ae7fae3c2b34aefbccc3e9.bindTooltip(
+                `<div>
+                     Order: 20<br>Street: Sepikoja<br>Length: 98.68 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_823ad5aa27f32e7bbfa65624a02d53c9 = L.polyline(
+                [[58.34587, 26.721888], [58.3458672, 26.723557]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_823ad5aa27f32e7bbfa65624a02d53c9.bindTooltip(
+                `<div>
+                     Order: 21<br>Street: Sepikoja<br>Length: 97.39 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_3c71f974c86ae2ee84cd5cc444447a5f = L.polyline(
+                [[58.3458672, 26.723557], [58.3428569, 26.7250265]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_3c71f974c86ae2ee84cd5cc444447a5f.bindTooltip(
+                `<div>
+                     Order: 22<br>Street: Jalaka<br>Length: 350.95 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_4ccd06cef6e58b6e2a2410b5732199f2 = L.polyline(
+                [[58.3428569, 26.7250265], [58.3458672, 26.723557]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_4ccd06cef6e58b6e2a2410b5732199f2.bindTooltip(
+                `<div>
+                     Order: 23<br>Street: Jalaka<br>Length: 350.95 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_fefb2b6805099d3305d8a794d492099d = L.polyline(
+                [[58.3458672, 26.723557], [58.34587, 26.721888]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_fefb2b6805099d3305d8a794d492099d.bindTooltip(
+                `<div>
+                     Order: 24<br>Street: Sepikoja<br>Length: 97.39 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_cd66651d5dca6e5b97479fa91543e25a = L.polyline(
+                [[58.34587, 26.721888], [58.347279, 26.721818]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_cd66651d5dca6e5b97479fa91543e25a.bindTooltip(
+                `<div>
+                     Order: 25<br>Street: Kolde<br>Length: 156.73 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_7a7d00f4c62e0006d68c9da33fd40f78 = L.polyline(
+                [[58.347279, 26.721818], [58.347271, 26.720511]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_7a7d00f4c62e0006d68c9da33fd40f78.bindTooltip(
+                `<div>
+                     Order: 26<br>Street: Alasi<br>Length: 76.27 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_875a9e33fc3d13df3cc9869a197d89b8 = L.polyline(
+                [[58.347271, 26.720511], [58.3474384, 26.7195193]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_875a9e33fc3d13df3cc9869a197d89b8.bindTooltip(
+                `<div>
+                     Order: 27<br>Street: Alasi<br>Length: 60.86 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_cf5536eb2f1619a09bcff1e51514f857 = L.polyline(
+                [[58.3474384, 26.7195193], [58.3463551, 26.7187676]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_cf5536eb2f1619a09bcff1e51514f857.bindTooltip(
+                `<div>
+                     Order: 28<br>Street: Sepakuru<br>Length: 128.19 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_9ea0baa52f95dcd5c534f1a76781f890 = L.polyline(
+                [[58.3463551, 26.7187676], [58.3474384, 26.7195193]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_9ea0baa52f95dcd5c534f1a76781f890.bindTooltip(
+                `<div>
+                     Order: 29<br>Street: Sepakuru<br>Length: 128.19 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_6ccc7d93c7c56e9c3865d2f2bd2365a3 = L.polyline(
+                [[58.3474384, 26.7195193], [58.34809, 26.7161858]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_6ccc7d93c7c56e9c3865d2f2bd2365a3.bindTooltip(
+                `<div>
+                     Order: 30<br>Street: Alasi<br>Length: 207.57 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_f67955978be7b1afbbd54280180aff86 = L.polyline(
+                [[58.34809, 26.7161858], [58.3474384, 26.7195193]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_f67955978be7b1afbbd54280180aff86.bindTooltip(
+                `<div>
+                     Order: 31<br>Street: Alasi<br>Length: 207.57 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_a464e66a24a0884afb215886e475d7a7 = L.polyline(
+                [[58.3474384, 26.7195193], [58.3489517, 26.7205476]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_a464e66a24a0884afb215886e475d7a7.bindTooltip(
+                `<div>
+                     Order: 32<br>Street: Sepakuru<br>Length: 178.71 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_baef36f82d610852069548fd448cfb66 = L.polyline(
+                [[58.3489517, 26.7205476], [58.3474384, 26.7195193]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_baef36f82d610852069548fd448cfb66.bindTooltip(
+                `<div>
+                     Order: 33<br>Street: Sepakuru<br>Length: 178.71 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_011941c1c96dc1fa9b666e9e33c2888a = L.polyline(
+                [[58.3474384, 26.7195193], [58.347271, 26.720511]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_011941c1c96dc1fa9b666e9e33c2888a.bindTooltip(
+                `<div>
+                     Order: 34<br>Street: Alasi<br>Length: 60.86 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_e595929c0a4b58167fd256687c13f93b = L.polyline(
+                [[58.347271, 26.720511], [58.347279, 26.721818]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_e595929c0a4b58167fd256687c13f93b.bindTooltip(
+                `<div>
+                     Order: 35<br>Street: Alasi<br>Length: 76.27 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_cd71eec7e3e40dad296aaede023a8856 = L.polyline(
+                [[58.347279, 26.721818], [58.347289, 26.723509]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_cd71eec7e3e40dad296aaede023a8856.bindTooltip(
+                `<div>
+                     Order: 36<br>Street: Alasi<br>Length: 98.68 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_7b3fe42a095205d9bab6c6f53da78aaf = L.polyline(
+                [[58.347289, 26.723509], [58.3472895, 26.7236626]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_7b3fe42a095205d9bab6c6f53da78aaf.bindTooltip(
+                `<div>
+                     Order: 37<br>Street: Alasi<br>Length: 8.96 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_ed8ea67c5aa4735df9d5f263a5d644b6 = L.polyline(
+                [[58.3472895, 26.7236626], [58.347331, 26.727208]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_ed8ea67c5aa4735df9d5f263a5d644b6.bindTooltip(
+                `<div>
+                     Order: 38<br>Street: Alasi<br>Length: 206.94 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_2b099157d319a1457640b5e25360e6f9 = L.polyline(
+                [[58.347331, 26.727208], [58.3472895, 26.7236626]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_2b099157d319a1457640b5e25360e6f9.bindTooltip(
+                `<div>
+                     Order: 39<br>Street: Alasi<br>Length: 206.94 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_dba691cd25094264ebae8da19f8e6c13 = L.polyline(
+                [[58.3472895, 26.7236626], [58.347289, 26.723509]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_dba691cd25094264ebae8da19f8e6c13.bindTooltip(
+                `<div>
+                     Order: 40<br>Street: Alasi<br>Length: 8.96 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_9cc97f0c7a2491d2534f836dd194bc61 = L.polyline(
+                [[58.347289, 26.723509], [58.346909, 26.723552]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_9cc97f0c7a2491d2534f836dd194bc61.bindTooltip(
+                `<div>
+                     Order: 41<br>Street: Jalaka<br>Length: 42.33 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_21fb5ee707133bfef84023e2e0d6fa4e = L.polyline(
+                [[58.346909, 26.723552], [58.3459278, 26.7235447]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_21fb5ee707133bfef84023e2e0d6fa4e.bindTooltip(
+                `<div>
+                     Order: 42<br>Street: Jalaka<br>Length: 109.16 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_b1ea44b38d13e200e6ac98cd19ab8be6 = L.polyline(
+                [[58.3459278, 26.7235447], [58.3458672, 26.723557]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_b1ea44b38d13e200e6ac98cd19ab8be6.bindTooltip(
+                `<div>
+                     Order: 43<br>Street: Jalaka<br>Length: 6.78 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+    
+            var poly_line_672ea95ef4d1720b35e9ab8f2ca838ce = L.polyline(
+                [[58.3458672, 26.723557], [58.3459278, 26.7235447]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_225a4c1a5a43c18882bb4d4901c25568);
+        
+    
+            poly_line_672ea95ef4d1720b35e9ab8f2ca838ce.bindTooltip(
+                `<div>
+                     Order: 44<br>Street: Jalaka<br>Length: 6.78 m
+                 </div>`,
+                {"sticky": true}
+            );
+        
+</script>
+</html>
