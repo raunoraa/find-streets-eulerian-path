@@ -2,7 +2,11 @@ import networkx as nx
 from shapely.geometry import shape, Polygon, Point
 import geojson
 
-# Doesnt do anything useful yet
+# Doesnt do anything useful yet 
+
+# Task list:
+# Build a multidigraph graph of all drivable lanes. TODO
+# Find eulerian path in the graph. TODO
 
 geojson_folder_location = "map_files/observable_geojson_files/"
 
