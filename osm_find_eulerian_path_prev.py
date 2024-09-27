@@ -216,4 +216,4 @@ def main(xml_file_path, verbose=True):
     visualize_eulerian_path(G, eulerian_path_list, boundary)
 
 # Call the main function with the path to your XML file
-main('map_files\osm_smaller.xml', verbose=False)
+main('map_files/osm_observable.xml', verbose=True)
