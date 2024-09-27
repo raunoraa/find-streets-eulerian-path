@@ -2,6 +2,7 @@ import osmnx as ox
 import networkx as nx
 import plotly.graph_objs as go
 from copy import deepcopy
+import folium
 
 def find_graph_boundaries(G):
     """Determine the boundaries of the graph based on node coordinates."""
@@ -215,4 +216,4 @@ def main(xml_file_path, verbose=True):
     visualize_eulerian_path(G, eulerian_path_list, boundary)
 
 # Call the main function with the path to your XML file
-main('osm_smaller.xml', verbose=False)
+main('map_files\osm_smaller.xml', verbose=False)
