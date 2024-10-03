@@ -89,4 +89,4 @@ for feature in lane_data['features']:
             print(f"Added reverse edge from {to_intersection} to {from_intersection}")
 
 # Output the final graph details
-print(f"Graph created with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
+#print(f"Graph created with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
