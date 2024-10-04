@@ -29,7 +29,7 @@ def parse_lanes(lane_geojson):
             lane_data = {
                 'road_id': lane['properties']['road'], 
                 'lane_id': lane['properties']['index'],
-                'direction': lane['properties']['direction'], 
+                #'direction': lane['properties']['direction'], 
                 'src_i': None, # value will be added in parse_intersections
                 'dst_i': None, # value will be added in parse_intersections
                 'geometry': shape(lane['geometry'])
@@ -61,7 +61,7 @@ def parse_intersections(intersection_geojson, all_lanes):
                 }
             )
         else:
-            # Let's not look at other types
+            # Let's not look at other types at the moment
             continue
 
     return intersections
@@ -69,11 +69,17 @@ def parse_intersections(intersection_geojson, all_lanes):
 # Create the directed multigraph
 def create_graph(lanes, intersections):
 
-    G = nx.MultiDiGraph()    
+    G = nx.MultiDiGraph()
+
+    # Added nodes, which are grouped by their intersection
+    # key=intersection id; value=set of nodes in an intersection
+    # a node is a 3-tuple
+    intersections_node_map = {}
 
     # We want to add intersections in a way
     # that there will be created one node per lane
     for intersection in intersections:
+        id = intersection.get('id')
         movements = intersection.get('movements')
         unique_roads = set() # a set of unique road ids in an intersection
         for movement in movements:
@@ -81,36 +87,73 @@ def create_graph(lanes, intersections):
 
             # There will always be 1-1 ratio of roads in intersections
             # so we can take unique ones only from source or destination
-            src_id = int(src_road.split('#')[-1])
+            src_id = int(src_road.split('#')[-1])            
             unique_roads.add(src_id)        
-
+        
+        tuples = set()
         for ur in unique_roads:
             lanes_in_ur = lanes.get(ur)
             for lane in lanes_in_ur:
                 # Just for now, assign the same geometry to each intersection node
                 # have to change later (it's just visual distortion, wont affect the graph)
-                G.add_node(lane, road_id=lane['road_id'], lane_id=lane['lane_id'], geometry=intersection['geometry'])
-        
-    # Draw edges inside the intersection (complex task, TODO)
-            
-    
-    # Add edges (lanes)
-    for lane in lanes:
-        src = lane['src_i']
-        dst = lane['dst_i']
-        G.add_edge(src, dst, lane_id=lane['lane_id'], geometry=lane['geometry'])
 
-    # Add movements (intersection-to-intersection connections) (deprecated)
-    '''
-    for intersection in intersections:
-        movements = intersection.get('movements')
-        for movement in movements:
-            src_road, dst_road = movement.split(" -> ")
-            src_id = int(src_road.split('#')[-1])
-            dst_id = int(dst_road.split('#')[-1])
-            if src_id in intersections and dst_id in intersections:
-                G.add_edge(src_id, dst_id)
-    '''
+                node_id = (id, lane['road_id'], lane['lane_id'])                
+
+                # Also add the info, if the node for the current lane is for entering or leaving the intersection
+                is_entering_value = False                
+                if lane['dst_i'] == id:
+                    is_entering_value = True                
+
+                tuples.add((node_id, is_entering_value, intersection['geometry']))
+                G.add_node(node_id, is_entering=is_entering_value, geometry=intersection['geometry'])
+        
+        intersections_node_map[id] = tuples
+    
+    # Create edges inside the intersection
+    for _, nodes in intersections_node_map.items():        
+        entering_nodes = []
+        leaving_nodes = []
+        for node in nodes:
+            _, is_entering, _ = node
+            if is_entering:
+                entering_nodes.append(node)
+            else:
+                leaving_nodes.append(node)
+            
+        if len(entering_nodes) > 0 and len(leaving_nodes) > 0:
+            for e_node in entering_nodes:
+                e_node_id, _, e_geometry = e_node                
+                for l_node in leaving_nodes:
+                    l_node_id, _, l_geometry = l_node
+
+                    # Need to tweak the geometry, but can be done later (TODO)
+                    # after the graph seems ok.
+                    # This is just placeholder geometry for now.
+                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry)
+    
+
+    # Create edges outside the intersections (basically add the lanes)
+    # We need to create an edge between all such nodes, which have the same road and lane id
+    observables = {}
+    for node in G.nodes:
+        id_tuple, _ = node
+        _, road_id, lane_id = id_tuple
+        observable_tuple = (road_id, lane_id)
+
+        # We can assume that there are only 2 nodes per each road
+        if observable_tuple in observables.keys():
+            node_one_id_tuple = observables.pop(observable_tuple)
+
+            lane_geometry = None
+            # Get the lane geometry from the lanes defaultdict
+            for l in lanes[road_id]:
+                if l.get('lane_id') == lane_id:
+                    lane_geometry = l.get('geometry')
+                    break
+
+            G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry)
+        else:
+            observables[observable_tuple] = node
 
     return G
 
