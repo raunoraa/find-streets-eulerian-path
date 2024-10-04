@@ -100,7 +100,7 @@ def create_graph(lanes, intersections):
         dst = lane['dst_i']
         G.add_edge(src, dst, lane_id=lane['lane_id'], geometry=lane['geometry'])
 
-    # Add movements (intersection-to-intersection connections)
+    # Add movements (intersection-to-intersection connections) (deprecated)
     '''
     for intersection in intersections:
         movements = intersection.get('movements')
@@ -111,7 +111,7 @@ def create_graph(lanes, intersections):
             if src_id in intersections and dst_id in intersections:
                 G.add_edge(src_id, dst_id)
     '''
-    
+
     return G
 
 # Main function to construct the graph from geojson files
