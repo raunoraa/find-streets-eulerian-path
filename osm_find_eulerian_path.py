@@ -91,7 +91,7 @@ def create_graph(lanes, intersections):
                 # have to change later (it's just visual distortion, wont affect the graph)
                 G.add_node(lane, road_id=lane['road_id'], lane_id=lane['lane_id'], geometry=intersection['geometry'])
         
-        # Draw edges inside the intersection (complex task, TODO)
+    # Draw edges inside the intersection (complex task, TODO)
             
     
     # Add edges (lanes)
