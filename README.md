@@ -2,9 +2,9 @@
 
 This repository contains different unfinished solutions for finding all street lanes' eulerian path:
 
-- **`osm_find_eulerian_path_prev_folium.py`** contains a solution, where all street lanes' eulerian path is found with using only the osm.xml file as input (right now, using osm_observable.xml file as input, graph is constructed with the osmnx library, eulerian path is found with the networkx library) and animating the eulerian path with the folium library. This is not a functional solution mainly because it doesn't take into account different drivable lanes.
+- **`osm_find_eulerian_path_prev_folium.py`** contains a solution, where all street lanes' eulerian path is found with using only the osm.xml file as input (right now, using osm_observable.xml file as input, graph is constructed with the osmnx library, eulerian path is found with the networkx library) and animating the eulerian path with the folium library (an html file is created). This is not a functional solution mainly because it doesn't take into account different drivable lanes.
 
-- **`osm_find_eulerian_path.py`** contains a solution, where all street lanes' graph is constructed based on the Intersection_polygons.geojson file and Lane_polygons.geojson file. Graph is created with the networkx library as a networkx object. Graph creation and visualization is seems to be working correctly. However, finding the eulerian path (or the shortest path to visit all the lanes at least once) is not yet implemented, because something needs to be done about the situations where the eulerian path does not exist in the given graph.
+- **`osm_find_eulerian_path.py`** contains a solution, where all street lanes' graph is constructed based on the Intersection_polygons.geojson file and Lane_polygons.geojson file. Graph is created with the networkx library as a networkx object. Graph creation and visualization (an html file is created with folium) seems to be working correctly. However, finding the eulerian path (or the shortest path to visit all the lanes at least once) is not yet implemented, because something needs to be done about the situations where the eulerian path does not exist in the given graph.
 
 
 ## How to run
