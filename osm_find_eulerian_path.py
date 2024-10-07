@@ -1,5 +1,6 @@
 import networkx as nx
 import geojson
+from Intersection import Intersection
 from shapely.geometry import shape
 from collections import defaultdict
 
@@ -39,27 +40,24 @@ def parse_lanes(lane_geojson):
 
 # Load intersections and their movements
 # Also assign src and destination intersections to lanes (lanes parameter will be modified)
-def parse_intersections(intersection_geojson, all_lanes):
-
+def parse_intersections(intersection_geojson, all_lanes):    
     intersections = set()
-
+    
     for feature in intersection_geojson['features']:
         i_type = feature['properties']['type']
+        
         if i_type == 'road':
-            # If the intersection type is road, then we can assign the src and dst intersections to lanes
-            lanes = all_lanes.get(feature['properties']['id'])
+            # If the intersection type is road, then we can assign the src and dst intersections to lanes            
+                        
+            lanes = all_lanes[feature['properties']['id']]
+                        
             for lane in lanes:
                 lane['src_i'] = feature['properties']['src_i']
                 lane['dst_i'] = feature['properties']['dst_i']
             
         elif i_type == 'intersection':
-            intersections.add(
-                {
-                    'id': feature['properties']['id'],
-                    'movements': feature['properties']['movements'],
-                    'geometry': shape(feature['geometry'])
-                }
-            )
+            intersection = Intersection(feature['properties']['id'], feature['properties']['movements'], shape(feature['geometry']))
+            intersections.add(intersection)
         else:
             # Let's not look at other types at the moment
             continue
@@ -79,11 +77,11 @@ def create_graph(lanes, intersections):
     # We want to add intersections in a way
     # that there will be created one node per lane
     for intersection in intersections:
-        id = intersection.get('id')
-        movements = intersection.get('movements')
+        id = intersection.id
+        movements = intersection.movements
         unique_roads = set() # a set of unique road ids in an intersection
         for movement in movements:
-            src_road, dst_road = movement.split(" -> ")
+            src_road, _ = movement.split(" -> ")
 
             # There will always be 1-1 ratio of roads in intersections
             # so we can take unique ones only from source or destination
@@ -104,8 +102,8 @@ def create_graph(lanes, intersections):
                 if lane['dst_i'] == id:
                     is_entering_value = True                
 
-                tuples.add((node_id, is_entering_value, intersection['geometry']))
-                G.add_node(node_id, is_entering=is_entering_value, geometry=intersection['geometry'])
+                tuples.add((node_id, is_entering_value, intersection.geometry))
+                G.add_node(node_id, is_entering=is_entering_value, geometry=intersection.geometry)
         
         intersections_node_map[id] = tuples
     
@@ -135,14 +133,16 @@ def create_graph(lanes, intersections):
     # Create edges outside the intersections (basically add the lanes)
     # We need to create an edge between all such nodes, which have the same road and lane id
     observables = {}
-    for node in G.nodes:
-        id_tuple, _ = node
+    for node in G.nodes(data=True):
+        #print(node)
+        id_tuple, _ = node        
+        #print(id_tuple)
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
 
         # We can assume that there are only 2 nodes per each road
         if observable_tuple in observables.keys():
-            node_one_id_tuple = observables.pop(observable_tuple)
+            node_one_id_tuple = observables.pop(observable_tuple)[0]
 
             lane_geometry = None
             # Get the lane geometry from the lanes defaultdict
@@ -150,7 +150,7 @@ def create_graph(lanes, intersections):
                 if l.get('lane_id') == lane_id:
                     lane_geometry = l.get('geometry')
                     break
-
+                        
             G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry)
         else:
             observables[observable_tuple] = node
@@ -170,9 +170,25 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file):
     G = create_graph(lanes, intersections)
     return G
 
-# Example usage
-lane_geojson_file = 'Lane_polygons.geojson'
-intersection_geojson_file = 'Intersection_polygons.geojson'
-city_graph = build_city_graph(lane_geojson_file, intersection_geojson_file)
+folder_path = 'map_files/observable_geojson_files/'
 
-# Now you have a graph `city_graph` with lanes as edges and intersections as nodes
+lane_geojson_file = folder_path + 'Lane_polygons.geojson'
+intersection_geojson_file = folder_path + 'Intersection_polygons.geojson'
+G = build_city_graph(lane_geojson_file, intersection_geojson_file)
+
+'''
+pos = nx.spring_layout(G)
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8, 6))
+nx.draw(G, pos, with_labels=True, node_size=2000, node_color='skyblue', font_size=12, font_weight='bold', edge_color='black', arrows=True)
+
+# Draw the edge labels to differentiate multiple edges
+edge_labels = { (u, v, k): f'{u}->{v}' for u, v, k in G.edges(keys=True)}
+nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+# Show the plot
+plt.title("MultiDiGraph Visualization")
+plt.show()
+'''
