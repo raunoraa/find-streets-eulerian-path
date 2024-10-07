@@ -187,6 +187,8 @@ for edge, data in G.nodes(data=True):
 import folium
 
 # Define your map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
+# Hardcoded for now, just for testing
+# Later can take this data from the Boundary.geojson file
 map_boundaries = (26.71823558920113, 58.345437318183514, 26.72398231102045, 58.34768867046722)
 
 # Create a Folium map centered on the middle of the boundaries
