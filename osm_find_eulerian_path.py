@@ -174,21 +174,58 @@ folder_path = 'map_files/observable_geojson_files/'
 
 lane_geojson_file = folder_path + 'Lane_polygons.geojson'
 intersection_geojson_file = folder_path + 'Intersection_polygons.geojson'
+
 G = build_city_graph(lane_geojson_file, intersection_geojson_file)
+#eulerian_path = nx.has_eulerian_path(G)
+print(nx.is_weakly_connected(G))
 
-'''
-pos = nx.spring_layout(G)
+for edge, data in G.nodes(data=True):
+    print(data)
 
-import matplotlib.pyplot as plt
 
-plt.figure(figsize=(8, 6))
-nx.draw(G, pos, with_labels=True, node_size=2000, node_color='skyblue', font_size=12, font_weight='bold', edge_color='black', arrows=True)
 
-# Draw the edge labels to differentiate multiple edges
-edge_labels = { (u, v, k): f'{u}->{v}' for u, v, k in G.edges(keys=True)}
-nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+import folium
 
-# Show the plot
-plt.title("MultiDiGraph Visualization")
-plt.show()
-'''
+# Define your map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
+map_boundaries = (26.71823558920113, 58.345437318183514, 26.72398231102045, 58.34768867046722)
+
+# Create a Folium map centered on the middle of the boundaries
+map_center = [(map_boundaries[1] + map_boundaries[3]) / 2, 
+              (map_boundaries[0] + map_boundaries[2]) / 2]
+
+# Initialize the Folium map
+m = folium.Map(location=map_center, zoom_start=13)
+
+# Add nodes to the map (assuming nodes are polygons)
+for node, data in G.nodes(data=True):
+    geometry = data['geometry']
+    if geometry:
+        # Get the coordinates of the polygon
+        coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
+        folium.Polygon(
+            locations=[(coord[1], coord[0]) for coord in coordinates],
+            color='blue',
+            fill=True,
+            fill_color='blue',
+            fill_opacity=0.5,
+            popup=f'Node {node}'
+        ).add_to(m)
+
+# Add edges to the map (assuming edges are also polygons)
+for u, v, data in G.edges(data=True):
+    geometry = data['geometry']
+    if geometry:
+        coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
+        folium.Polygon(
+            locations=[(coord[1], coord[0]) for coord in coordinates],
+            color='black',
+            #weight=2,
+            #opacity=0.7,
+            fill=True,
+            fill_color='red',
+            fill_opacity=0.5,
+            popup=f'Edge from {u} to {v}'
+        ).add_to(m)
+
+# Save or display the map
+m.save('city_graph_map.html')
