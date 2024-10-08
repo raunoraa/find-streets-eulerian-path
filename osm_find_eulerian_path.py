@@ -177,19 +177,31 @@ intersection_geojson_file = folder_path + 'Intersection_polygons.geojson'
 
 G = build_city_graph(lane_geojson_file, intersection_geojson_file)
 #eulerian_path = nx.has_eulerian_path(G)
-print(nx.is_weakly_connected(G))
+#print(nx.is_weakly_connected(G))
 
-for edge, data in G.nodes(data=True):
-    print(data)
+#for edge, data in G.nodes(data=True):
+    #print(data)
 
 
 
 import folium
 
-# Define your map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
-# Hardcoded for now, just for testing
-# Later can take this data from the Boundary.geojson file
-map_boundaries = (26.71823558920113, 58.345437318183514, 26.72398231102045, 58.34768867046722)
+def get_boundaries(geojson_boundaries):
+    lats = []
+    lons = []
+
+    coordinates = geojson_boundaries['geometry']['coordinates'][0]    
+    for coordinate in coordinates:        
+        lats.append(coordinate[0])
+        lons.append(coordinate[1])
+    
+    return (min(lats), min(lons), max(lats), max(lons))
+
+# Define map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
+# Take this data from the Boundary.geojson file
+boundary_geojson_file = folder_path + 'Boundary.geojson'
+loaded_boundary_geojson = load_geojson(boundary_geojson_file)
+map_boundaries = get_boundaries(loaded_boundary_geojson)
 
 # Create a Folium map centered on the middle of the boundaries
 map_center = [(map_boundaries[1] + map_boundaries[3]) / 2, 
