@@ -275,6 +275,7 @@ except:
     
 
     #print(G.edges)
+    # Counter is just for debugging purposes
     counter = 0
     while True:
 
