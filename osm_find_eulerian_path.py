@@ -294,6 +294,10 @@ except:
         counter += 1
         G.remove_nodes_from(nodes_to_remove)       
 
+    # After the first iteration, it can be seen (when compared to the visualization of the graph before the nodes were removed) 
+    # that some of the nodes, which shouldnt have out-degree 0,
+    # still had out-degree 0 and were thus removed.
+    # It implicates, that graph creation is still probably faulty.
     visualize_graph(G, map_boundaries, "debug_map") 
 
     def dfs_rec(adj, visited, s, adj_keys):
