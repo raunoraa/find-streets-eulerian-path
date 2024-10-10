@@ -94,6 +94,9 @@ def create_graph(lanes, intersections):
             src_id = int(src_road.split('#')[-1])            
             unique_roads.add(src_id)        
         
+        
+        counter = 0
+
         tuples = set()
         for ur in unique_roads:
             lanes_in_ur = lanes.get(ur)
@@ -108,17 +111,19 @@ def create_graph(lanes, intersections):
                 if lane['dst_i'] == id:
                     is_entering_value = True                
 
-                tuples.add((node_id, is_entering_value, intersection.geometry))
-                G.add_node(node_id, is_entering=is_entering_value, geometry=intersection.geometry)
+                tuples.add((node_id, is_entering_value, intersection.geometry, id))
+                G.add_node(node_id, is_entering=is_entering_value, geometry=intersection.geometry, intersection_id=id)
+                counter += 1
         
         intersections_node_map[id] = tuples
+        print(f"Nodes in intersection {id}: {counter}")
     
     # Create edges inside the intersection
     for _, nodes in intersections_node_map.items():        
         entering_nodes = []
         leaving_nodes = []
         for node in nodes:
-            _, is_entering, _ = node
+            _, is_entering, _, _ = node
             if is_entering:
                 entering_nodes.append(node)
             else:
@@ -126,9 +131,9 @@ def create_graph(lanes, intersections):
             
         if len(entering_nodes) > 0 and len(leaving_nodes) > 0:
             for e_node in entering_nodes:
-                e_node_id, _, e_geometry = e_node                
+                e_node_id, _, e_geometry, _ = e_node                
                 for l_node in leaving_nodes:
-                    l_node_id, _, l_geometry = l_node
+                    l_node_id, _, l_geometry, _ = l_node
 
                     # Need to tweak the geometry, but can be done later (TODO)
                     # after the graph seems ok.
@@ -204,7 +209,7 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map"):
             '''
             folium.Marker(
                 location=(coordinates[0][1] + random.uniform(-0.00003, 0.00003), coordinates[0][0] + random.uniform(-0.00003, 0.00003)),
-                popup=G.out_degree(node),  # Optional popup text
+                popup=f"Out degree: {G.out_degree(node)}; Int.id: {data['intersection_id']}",  # Optional popup text
                 icon=folium.Icon(color='blue')  # Optional: Customize the marker color
             ).add_to(m)
 
@@ -254,7 +259,6 @@ map_boundaries = get_boundaries(loaded_boundary_geojson)
 
 # Visualize the created graph for debugging
 visualize_graph(G, map_boundaries)
-
 
 
 ###
