@@ -4,6 +4,12 @@ from Intersection import Intersection
 from shapely.geometry import shape
 from collections import defaultdict
 
+# Graph visualization
+import folium
+import random
+
+
+
 # Load GeoJSON files
 def load_geojson(file_path):
     with open(file_path, 'r') as f:
@@ -170,21 +176,64 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file):
     G = create_graph(lanes, intersections)
     return G
 
+
+def visualize_graph(G, map_boundaries, file_name="city_graph_map"):
+
+    # Create a Folium map centered on the middle of the boundaries
+    map_center = [(map_boundaries[1] + map_boundaries[3]) / 2, 
+                (map_boundaries[0] + map_boundaries[2]) / 2]
+
+    # Initialize the Folium map
+    m = folium.Map(location=map_center, zoom_start=13)
+
+    # Add nodes to the map (assuming nodes are polygons)
+    for node, data in G.nodes(data=True):
+        geometry = data['geometry']
+        if geometry:
+            # Get the coordinates of the polygon
+            coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
+            '''
+            folium.Polygon(
+                locations=[(coord[1], coord[0]) for coord in coordinates],
+                color='blue',
+                fill=True,
+                fill_color='blue',
+                fill_opacity=0.5,
+                popup=f'Node {node}'
+            ).add_to(m)
+            '''
+            folium.Marker(
+                location=(coordinates[0][1] + random.uniform(-0.00003, 0.00003), coordinates[0][0] + random.uniform(-0.00003, 0.00003)),
+                popup=G.out_degree(node),  # Optional popup text
+                icon=folium.Icon(color='blue')  # Optional: Customize the marker color
+            ).add_to(m)
+
+    # Add edges to the map (assuming edges are also polygons)
+    for u, v, data in G.edges(data=True):
+        geometry = data['geometry']
+        if geometry:
+            coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
+            folium.Polygon(
+                locations=[(coord[1], coord[0]) for coord in coordinates],
+                color='black',
+                #weight=2,
+                #opacity=0.7,
+                fill=True,
+                fill_color='red',
+                fill_opacity=0.5,
+                popup=f'Edge from {u} to {v}'
+            ).add_to(m)
+
+    # Save the map as an html file
+    m.save(file_name + '.html')
+
 folder_path = 'map_files/observable_geojson_files/'
 
 lane_geojson_file = folder_path + 'Lane_polygons.geojson'
 intersection_geojson_file = folder_path + 'Intersection_polygons.geojson'
 
+# Build the graph
 G = build_city_graph(lane_geojson_file, intersection_geojson_file)
-#eulerian_path = nx.has_eulerian_path(G)
-#print(nx.is_weakly_connected(G))
-
-#for edge, data in G.nodes(data=True):
-    #print(data)
-
-
-
-import folium
 
 def get_boundaries(geojson_boundaries):
     lats = []
@@ -203,43 +252,75 @@ boundary_geojson_file = folder_path + 'Boundary.geojson'
 loaded_boundary_geojson = load_geojson(boundary_geojson_file)
 map_boundaries = get_boundaries(loaded_boundary_geojson)
 
-# Create a Folium map centered on the middle of the boundaries
-map_center = [(map_boundaries[1] + map_boundaries[3]) / 2, 
-              (map_boundaries[0] + map_boundaries[2]) / 2]
+# Visualize the created graph for debugging
+visualize_graph(G, map_boundaries)
 
-# Initialize the Folium map
-m = folium.Map(location=map_center, zoom_start=13)
 
-# Add nodes to the map (assuming nodes are polygons)
-for node, data in G.nodes(data=True):
-    geometry = data['geometry']
-    if geometry:
-        # Get the coordinates of the polygon
-        coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
-        folium.Polygon(
-            locations=[(coord[1], coord[0]) for coord in coordinates],
-            color='blue',
-            fill=True,
-            fill_color='blue',
-            fill_opacity=0.5,
-            popup=f'Node {node}'
-        ).add_to(m)
 
-# Add edges to the map (assuming edges are also polygons)
-for u, v, data in G.edges(data=True):
-    geometry = data['geometry']
-    if geometry:
-        coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
-        folium.Polygon(
-            locations=[(coord[1], coord[0]) for coord in coordinates],
-            color='black',
-            #weight=2,
-            #opacity=0.7,
-            fill=True,
-            fill_color='red',
-            fill_opacity=0.5,
-            popup=f'Edge from {u} to {v}'
-        ).add_to(m)
+###
+# Find the shortest path to visit each graph edge at least once
+###
 
-# Save or display the map
-m.save('city_graph_map.html')
+# Try to get the eulerian path of the graph
+try:
+    eulerian_path = list(nx.eulerian_path(G))
+    print(eulerian_path)
+
+except:
+# If the eulerian path doesn't exist, we need to do the following:
+# 1) Filter out all such nodes from the graph, which have no outgoing edges.
+# 2) Filter out all such edges from the graph, which had removed node as part of it.
+# 3) Repeat steps 1-2 until there are no such nodes left in the graph, which have no outgoing edges.
+# 4) Perform depth first search on the graph to find the shortest path for visiting each edge at least once.
+    
+
+    #print(G.edges)
+    counter = 0
+    while True:
+
+        nodes_to_remove = []
+
+        #print()
+        for node in G.nodes:            
+            #print(node, G.out_degree(node))
+            if G.out_degree(node) == 0:
+                
+                nodes_to_remove.append(node)
+        #print()
+        
+        if len(nodes_to_remove) == 0 or counter > 0:
+            break
+        
+        counter += 1
+        G.remove_nodes_from(nodes_to_remove)       
+
+    visualize_graph(G, map_boundaries, "debug_map") 
+
+    def dfs_rec(adj, visited, s, adj_keys):
+        # Mark the current vertex as visited
+        visited[adj_keys.index(s)] = True
+
+        # Print the current vertex
+        print(s, end=" ")
+
+        # Recursively visit all adjacent vertices
+        # that are not visited yet
+        for i in adj[s]:
+            if not visited[adj_keys.index(i)]:
+                dfs_rec(adj, visited, i, adj_keys)
+
+
+    def dfs(adj, s):
+        visited = [False] * len(list(adj.keys())) 
+        adj_keys = list(adj.keys())   
+        # Call the recursive DFS function
+        dfs_rec(adj, visited, s, adj_keys)
+
+    #adj_list = [[el[0], el[1]] for el in G.edges]
+    #print(adj_list)
+
+    adj_table = defaultdict(set)
+    for el in G.edges:
+        adj_table[el[0]].add(el[1])
+
+    dfs(adj_table, list(G.nodes)[0])
