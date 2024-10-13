@@ -2,7 +2,7 @@
 
 This repository contains unfinished solution for finding all streets' lanes' shortest path:
 
-- **`osm_find_shortest_path.py`** contains a solution, where all street lanes' graph is constructed based on the Intersection_polygons.geojson file and Lane_polygons.geojson file. Graph is created with the networkx library as a networkx object. Graph creation and visualization (an html file is created with folium) seems to be working correctly. It will also now generate the solution with the shortest path and visualize it. 
+- **`osm_find_shortest_path.py`** contains a solution, where all street lanes' graph is constructed based on the Intersection_polygons.geojson file and Lane_polygons.geojson file. Graph is created with the networkx library as a networkx object. Graph creation and visualization (an html file is created with folium) seems to be working correctly. It will also now generate the solution with the shortest path and visualize it (another html file is created with folium). 
 
 - **TODO** The visualization could be improved a lot (there are some bugs currently with the sliders and it isn't totally clear from the visualization if the shortest path finding algorithm is working correctly, also some of the geometry stuff is unimplemented and can be improved as well). The data for the total path length in kilometres should also be collected and shown.
 
