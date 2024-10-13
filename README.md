@@ -14,5 +14,5 @@ Here are the instructions, how to run and test the current solution:
 - You need to clone this repository first, then open the project with visual studio code, then download the extension called **Live Server**.
 
 - **`osm_find_shortest_path.py`**: If you plan to change anything in the code, you need to run this file before you do any of the following to generate new (updated) html files.
-- When you want to see just the graph, open the file in vsc editor called `city_graph_map.html` and then run live server.
-- When you want to see the shortest path through all of the streets' lanes', open the file in vsc editor called  `animated_path.html` and then run live server.
+    - When you want to see just the graph, open the file in vsc editor called `city_graph_map.html` and then run live server.
+    - When you want to see the shortest path through all of the streets' lanes', open the file in vsc editor called  `animated_path.html` and then run live server.
