@@ -13,4 +13,4 @@ class Intersection:
         return self.id == other.id
     
     def __repr__(self):
-        return f"Intersection({self.road_id}, {self.lane_id}, {self.is_entering})"
+        return f"Intersection({self.id}, {self.movements}, {self.geometry})"

@@ -3,11 +3,13 @@ import networkx as nx
 import geojson
 from Intersection import Intersection
 from shapely.geometry import shape
+from shapely import Polygon
 from collections import defaultdict
 
 # Graph visualization
 import folium
 import random
+import math
 
 
 
@@ -72,6 +74,17 @@ def parse_intersections(intersection_geojson, all_lanes):
 
     return intersections
 
+# Create such line, which goes through the middle of the lane polygon
+def centerline_from_lane_polygon(lane_polygon):
+    # Shrink the polygon slightly inward to create a line (this follows the shape)
+    centerline = lane_polygon.buffer(-0.000001)  # Shrink the polygon by a small amount
+    
+    # If the result is a polygon, extract the exterior as a line
+    #if isinstance(centerline, Polygon):
+        #centerline = centerline.exterior  # Take the outer boundary as a line
+    
+    return centerline  # This is now a LineString (the centerline)
+
 # Create the directed multigraph
 def create_graph(lanes, intersections):
 
@@ -118,14 +131,19 @@ def create_graph(lanes, intersections):
                 is_entering_value = False                
                 if (lane['dst_i'] == id and lane['direction'] == 'Forward') or (lane['src_i'] == id and lane['direction'] == 'Backward'):
                     is_entering_value = True        
+                
+                # debug
+                if id == 1 or id == 22:
+                    print(node_id, is_entering_value)        
 
-                print(node_id, is_entering_value)        
 
                 tuples.add((node_id, is_entering_value, intersection.geometry, id))
                 G.add_node(node_id, is_entering=is_entering_value, geometry=intersection.geometry, intersection_id=id)
                 counter += 1
         
         intersections_node_map[id] = tuples
+
+        # debug
         print(f"Nodes in intersection {id}: {counter}")
     
     # Create edges inside the intersection
@@ -145,10 +163,14 @@ def create_graph(lanes, intersections):
                 for l_node in leaving_nodes:
                     l_node_id, _, l_geometry, _ = l_node
 
+                    #debug
+                    if l_node_id[0] == 1 or e_node_id[0] == 1:
+                        print(l_node_id, e_node_id)
+
                     # Need to tweak the geometry, but can be done later (TODO)
                     # after the graph seems ok.
                     # This is just placeholder geometry for now.
-                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry)
+                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry, centerline=centerline_from_lane_polygon(e_geometry))
     
 
     # Create edges outside the intersections (basically add the lanes)
@@ -171,12 +193,14 @@ def create_graph(lanes, intersections):
             for l in lanes[road_id]:
                 if l.get('lane_id') == lane_id:
                     lane_geometry = l.get('geometry')
-                    break            
+                    break  
+
+            centerline_geometry = centerline_from_lane_polygon(lane_geometry)
             
             if not node_data['is_entering']:
-                G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry)
+                G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry, centerline=centerline_geometry)
             else:
-                G.add_edge(node_one_id_tuple, id_tuple, geometry = lane_geometry)
+                G.add_edge(node_one_id_tuple, id_tuple, geometry = lane_geometry, centerline=centerline_geometry)
         else:
             observables[observable_tuple] = node    
 
@@ -249,16 +273,18 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
 
     return m
 
-def visualize_path(folium_map_object, G, path):
+def visualize_path(folium_map_object, G, path):    
 
     for order, node in enumerate(path):
         
         if order == len(path) - 1:
             break
-
+        
+        '''
         # function to get the arithmetic mean value of the list
         get_avg = lambda numbers: sum(numbers) / len(numbers) if numbers else 0
 
+        
         node_geometry = G.nodes[node]['geometry']
 
         start_coordinates = list(node_geometry.exterior.coords)  # Taking the first polygon's coordinates
@@ -268,9 +294,11 @@ def visualize_path(folium_map_object, G, path):
             y_start_coords.append(coord[1])
             x_start_coords.append(coord[0])        
         avg_start_coordinates = (get_avg(y_start_coords), get_avg(x_start_coords))
+        '''
 
-
-        next_node = G.nodes[path[order + 1]]
+        next_node_id = path[order + 1]
+        #next_node = G.nodes[next_node_id]        
+        '''
         nn_geometry = next_node['geometry']
 
         end_coordinates = list(nn_geometry.exterior.coords)
@@ -280,15 +308,30 @@ def visualize_path(folium_map_object, G, path):
             y_end_coords.append(coord[1])
             x_end_coords.append(coord[0])
         avg_end_coordinates = (get_avg(y_end_coords), get_avg(x_end_coords))
+        '''
+
+        #print(node, next_node_id)
+        # Such edge has to exist, otherwise something is wrong
+        # as of now, something is wrong, it seems to be an algorithm problem as graph seems ok
+        #print(node, next_node_id)
+        corresponding_edge = G[node][next_node_id]
+        #print(corresponding_edge)
+        edge_centerline_geometry = list(corresponding_edge.values())[0]['centerline']
+
+        coords = edge_centerline_geometry.exterior.coords
+        #print(coords[1], coords[0])
 
         polyline = folium.PolyLine(
-            locations= [avg_start_coordinates, avg_end_coordinates],
+            #locations= [avg_start_coordinates, avg_end_coordinates],
+            locations = [coords[1], coords[0]],
             color = 'blue', 
             weight = 3,
             tooltip=f"Order: {order}",
             opacity = 0,
         )
         polyline.add_to(folium_map_object)
+
+
         
     # Add custom JavaScript for animation control
     animation_script = Template("""
@@ -303,17 +346,44 @@ def visualize_path(folium_map_object, G, path):
         let playing = false;
                                 
         let infoText = document.getElementById('info-text');
+
+        /*
+        // Add an SVG marker definition for an arrowhead
+        let svgNS = "http://www.w3.org/2000/svg";
+        let arrowDef = document.createElementNS(svgNS, "marker");
+        arrowDef.setAttribute("id", "arrow");
+        arrowDef.setAttribute("markerWidth", "10");
+        arrowDef.setAttribute("markerHeight", "10");
+        arrowDef.setAttribute("refX", "10");
+        arrowDef.setAttribute("refY", "3");
+        arrowDef.setAttribute("orient", "auto");
+        arrowDef.setAttribute("markerUnits", "strokeWidth");
+
+        // Create the actual arrowhead path
+        let arrowPath = document.createElementNS(svgNS, "path");
+        arrowPath.setAttribute("d", "M0,0 L0,6 L9,3 z"); // Simple triangle for the arrow
+        arrowPath.setAttribute("fill", "yellow");  // Same color as the polyline
+
+        // Append the arrowhead to the marker definition
+        arrowDef.appendChild(arrowPath);
+
+        // Add the marker to the map's SVG layer
+        let svgDefs = document.createElementNS(svgNS, "defs");
+        svgDefs.appendChild(arrowDef);
+        map.getPanes().overlayPane.querySelector("svg").appendChild(svgDefs);
+        */
+                                
                                 
         //let polylines = document.querySelectorAll(".leaflet-interactive");
         let polylines = [];
         map.eachLayer(function(layer) {
             if(layer instanceof L.Polyline) {                
-                if(layer["_path"].getAttribute("stroke") === "blue")
+                if(layer["_path"].getAttribute("stroke") === "blue")                    
+                    //layer["_path"].setAttribute("marker-end", "url(#arrow)"); // Add the arrowhead to the end of the line
                     polylines.push(layer["_path"]);
             }
-        });
-                                
-        //console.log(polylines);
+        });                                                                                                      
+                            
         
         let prev_polyline = null;
 
@@ -584,10 +654,11 @@ except:
     #adj_list = [[el[0], el[1]] for el in G.edges]
     #print(adj_list)
 
-    adj_table = defaultdict(set)
+    adj_table = defaultdict(set)    
     for el in G.edges:
         adj_table[el[0]].add(el[1])
+    print(adj_table)
 
     dfs(adj_table, list(G.nodes)[0])    
-
+    #print(node_queue)
     visualize_path(visualized_graph, G, node_queue)
