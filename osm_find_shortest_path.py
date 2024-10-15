@@ -9,7 +9,6 @@ from collections import defaultdict
 # Graph visualization
 import folium
 import random
-import math
 
 
 
