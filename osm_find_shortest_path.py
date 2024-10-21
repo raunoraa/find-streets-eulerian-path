@@ -5,11 +5,14 @@ from Intersection import Intersection
 from shapely.geometry import shape
 from shapely import Polygon
 from collections import defaultdict
+from itertools import combinations
+from copy import deepcopy
 
 # Graph visualization
 import folium
 import random
 
+import time
 
 
 # Load GeoJSON files
@@ -272,7 +275,8 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
 
     return m
 
-def visualize_path(folium_map_object, G, path):    
+def visualize_path(folium_map_object, G, path):   
+    print() 
 
     for order, node in enumerate(path):
         
@@ -313,6 +317,7 @@ def visualize_path(folium_map_object, G, path):
         # Such edge has to exist, otherwise something is wrong
         # as of now, something is wrong, it seems to be an algorithm problem as graph seems ok
         #print(node, next_node_id)
+        print((node, next_node_id), (node, next_node_id) in G.edges)
         corresponding_edge = G[node][next_node_id]
         #print(corresponding_edge)
         edge_centerline_geometry = list(corresponding_edge.values())[0]['centerline']
@@ -619,45 +624,162 @@ except:
         
         counter += 1
         G.remove_nodes_from(nodes_to_remove)       
-
-    # After the first iteration, it can be seen (when compared to the visualization of the graph before the nodes were removed) 
-    # that some of the nodes, which shouldnt have out-degree 0,
-    # still had out-degree 0 and were thus removed.
-    # It implicates, that graph creation is still probably faulty.
-    visualized_graph = visualize_graph(G, map_boundaries, "debug_map", visualize_nodes=False) 
     
-    node_queue = []
+    visualized_graph = visualize_graph(G, map_boundaries, "debug_map", visualize_nodes=False) 
 
-    def dfs_rec(adj, visited, s, adj_keys):
-        global node_queue
+
+    def calculate_surplus_and_deficit(graph, traversal_counts = None):        
+        """Calculate surplus and deficit nodes based on in-degree and out-degree."""
+        in_degrees = defaultdict(int)
+        out_degrees = defaultdict(int)
         
-        # Mark the current vertex as visited
-        visited[adj_keys.index(s)] = True
+        # Calculate the in-degrees and out-degrees
+        for u in graph:
+            out_degrees[u] += len(graph[u])  # Count outgoing edges
+            for v in graph[u]:
+                in_degrees[v] += 1  # Count incoming edges
         
-        #print(s, end=" -> ")
-        node_queue.append(s)
+        surplus = {}
+        deficit = {}
+        
+        if not traversal_counts is None:
+            # Now adjust the surplus and deficit based on traversal counts
+            for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
+                out_deg = out_degrees[node]
+                in_deg = in_degrees[node]
+                
+                # Account for extra traversals allowed on edges
+                for neighbor in graph[node]:
+                    out_deg += traversal_counts[node][neighbor] - 1  # Adjust for extra traversal counts
+                
+                for neighbor in graph:  # Check for incoming edges
+                    in_deg += traversal_counts[neighbor].get(node, 0) - 1  # Adjust for incoming traversals
+                
+                if out_deg > in_deg:
+                    surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
+                elif in_deg > out_deg:
+                    deficit[node] = in_deg - out_deg  # Node with surplus incoming edges                        
+        else:
+            # Identify surplus and deficit nodes
+            for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
+                out_deg = out_degrees[node]
+                in_deg = in_degrees[node]
+                if out_deg > in_deg:
+                    surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
+                elif in_deg > out_deg:
+                    deficit[node] = in_deg - out_deg  # Node with surplus incoming edges
+        
+        return surplus, deficit
+    
+    def balance_graph_with_retraced_edges(graph, surplus, deficit):
+        """Balance the graph by retracing edges and adjusting traversal counts."""
+        traversal_counts = defaultdict(lambda: defaultdict(int))  # traversal_counts[from][to] = count
+        for u in graph:
+            for v in graph[u]:
+                traversal_counts[u][v] = 1  # Initialize traversal counts
+        
+        # Handle retracing of edges between surplus and deficit nodes
+        for s_node, s_surplus in surplus.items():
+            for d_node, d_deficit in deficit.items():
+                if s_surplus > 0 and d_deficit > 0:
+                    # Use Dijkstra to find the shortest path from s_node to d_node                    
+                    shortest_path = nx.dijkstra_path(nx.DiGraph(graph), s_node, d_node)                    
+                    
+                    # Increment the traversal count for the edges in the path
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i + 1]
+                        traversal_counts[u][v] += 1  # Increment traversal count for this edge
+                        s_surplus -= 1
+                        d_deficit -= 1
+                        if s_surplus == 0 or d_deficit == 0:
+                            break
 
-        # Recursively visit all adjacent vertices
-        # that are not visited yet
-        for i in adj[s]:
-            if not visited[adj_keys.index(i)]:
-                dfs_rec(adj, visited, i, adj_keys)
+        return traversal_counts
+    
+    def update_graph_traversal_counts(graph, traversal_counts):
+        # Handle retracing of edges between surplus and deficit nodes
+        for s_node, s_surplus in surplus.items():
+            for d_node, d_deficit in deficit.items():
+                if s_surplus > 0 and d_deficit > 0:
+                    # Use Dijkstra to find the shortest path from s_node to d_node                    
+                    shortest_path = nx.dijkstra_path(nx.DiGraph(graph), s_node, d_node)                    
+                    
+                    # Increment the traversal count for the edges in the path
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i + 1]
+                        traversal_counts[u][v] += 1  # Increment traversal count for this edge
+                        s_surplus -= 1
+                        d_deficit -= 1
+                        if s_surplus == 0 or d_deficit == 0:
+                            break
 
+    def backtrack_and_adjust(graph, traversal_counts):
+        """Backtrack and adjust the graph until all edges are traversed."""       
+        t_counts = traversal_counts 
+        while True:
+            # Recalculate surplus and deficit
+            surplus, deficit = calculate_surplus_and_deficit(graph, t_counts)
+            
+            time.sleep(1)
+            print("-"*10)
+            print(surplus, deficit)
+            print("-"*10)
+            
+            # If there's no surplus or deficit left, break the loop
+            if not surplus and not deficit:
+                break
+            
+            # Balance the graph again by adjusting traversal counts
+            #t_counts = balance_graph_with_retraced_edges(graph, surplus, deficit)
+            update_graph_traversal_counts(graph, t_counts)
+        
+        return t_counts
 
-    def dfs(adj, s):
-        visited = [False] * len(list(adj.keys())) 
-        adj_keys = list(adj.keys())   
-        # Call the recursive DFS function
-        dfs_rec(adj, visited, s, adj_keys)
-
-    #adj_list = [[el[0], el[1]] for el in G.edges]
-    #print(adj_list)
+    def construct_weak_eulerian_path(graph, traversal_counts):
+        """Construct a weak Eulerian path, visiting every edge at least once using traversal counts."""
+        path = []
+        current_node = next(iter(graph))  # Start at an arbitrary node (or surplus node)
+        
+        # Traverse the graph based on traversal counts
+        while True:
+            # Find the next node to visit based on the traversal count
+            for next_node in graph[current_node]:
+                if traversal_counts[current_node][next_node] > 0:
+                    path.append((current_node, next_node))
+                    traversal_counts[current_node][next_node] -= 1  # Decrement the traversal count
+                    current_node = next_node
+                    break
+            else:
+                # If no more valid edges are found, break the loop
+                break
+        
+        return path    
 
     adj_table = defaultdict(set)    
+
     for el in G.edges:
         adj_table[el[0]].add(el[1])
-    print(adj_table)
 
-    dfs(adj_table, list(G.nodes)[0])    
-    #print(node_queue)
-    visualize_path(visualized_graph, G, node_queue)
+    graph_list = defaultdict(list)
+
+    for key, value in adj_table.items():
+        graph_list[key] = list(value)
+
+    debug_copy = deepcopy(graph_list)
+
+    surplus, deficit = calculate_surplus_and_deficit(graph_list)
+    traversal_counts = balance_graph_with_retraced_edges(graph_list, surplus, deficit)    
+    traversal_counts = backtrack_and_adjust(graph_list, traversal_counts)
+    path = construct_weak_eulerian_path(graph_list, traversal_counts)
+    print(path) 
+    #print(construct_eulerian_path(graph_list, traversal_counts))
+
+    #mdg = nx.MultiDiGraph(graph_list)
+    #print(nx.has_eulerian_path(mdg))
+    
+    #path = find_chinese_postman_tour_multidigraph(adj_table, G)
+    #print(path)
+
+    #path = dfs_multidigraph(G, adj_table, list(G.nodes)[0])    
+    #print(path)
+    #visualize_path(visualized_graph, G, path)
