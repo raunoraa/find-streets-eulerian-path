@@ -12,12 +12,6 @@ from copy import deepcopy
 import folium
 import random
 
-# OSM XML parsing
-import xml.etree.ElementTree as ET
-
-# For calculating the length of a road based on its coordinates
-from geopy.distance import geodesic
-
 import time
 
 
@@ -37,56 +31,20 @@ def is_car_drivable(lane):
     # Return True if either access is 'Yes'
     return backward_access == 'Yes' or forward_access == 'Yes'
 
-def parse_osm_file(file_path, way_id):
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-
-    way = root.find(f"./way[@id='{way_id}]")
-    
-    nodes = [nd.attrib['ref'] for nd in way.findall('nd')]
-    node_coords = []
-    for node_id in nodes:
-        node = root.find(f"./node[@id='{node_id}']")
-        lat = float(node.attrib['lat'])
-        lon = float(node.attrib['lon'])
-        node_coords.append((lat, lon))
-
-    tags = {tag.attrib['k']: tag.attrib['v'] for tag in way.findall('tag')}
-    street_name = tags.get('addr:street')
-    return node_coords, street_name
-
-def find_lane_distance(node_coords):
-
-    total_length = 0.0    
-    for i in range(len(node_coords) - 1):
-        start_node = node_coords[i]
-        next_node = node_coords[i+1]
-        total_length += geodesic(start_node, next_node).meters
-
-    return total_length
-
-
 # Load and filter car-drivable lanes
 # Returns a defaultdict, where keys are road_ids and values are the lanes (and their respective data) 
-def parse_lanes(lane_geojson, osm_xml_file_path):
+#  each road has
+def parse_lanes(lane_geojson):
     lanes_by_road_id = defaultdict(list)  # A dictionary where road_id is the key, and values are lists of lanes
     for lane in lane_geojson['features']:
         if is_car_drivable(lane):
-
-            # Find out the lane's distance
-            osm_way_id = lane['properties']['osm_way_ids'][0]
-            node_coords, street_name = parse_osm_file(osm_xml_file_path, osm_way_id)            
-            distance = find_lane_distance(node_coords)
-
             lane_data = {
                 'road_id': lane['properties']['road'], 
                 'lane_id': lane['properties']['index'],
                 'direction': lane['properties']['direction'], 
                 'src_i': None, # value will be added in parse_intersections
                 'dst_i': None, # value will be added in parse_intersections
-                'geometry': shape(lane['geometry']),
-                'distance': distance,
-                'street_name': street_name,
+                'geometry': shape(lane['geometry'])
             }
             lanes_by_road_id[lane_data['road_id']].append(lane_data)  # Group lanes by road_id
     return lanes_by_road_id
@@ -117,6 +75,17 @@ def parse_intersections(intersection_geojson, all_lanes):
             continue
 
     return intersections
+
+# Create such line, which goes through the middle of the lane polygon
+def centerline_from_lane_polygon(lane_polygon):
+    # Shrink the polygon slightly inward to create a line (this follows the shape)
+    centerline = lane_polygon.buffer(-0.000001)  # Shrink the polygon by a small amount
+    
+    # If the result is a polygon, extract the exterior as a line
+    #if isinstance(centerline, Polygon):
+        #centerline = centerline.exterior  # Take the outer boundary as a line
+    
+    return centerline  # This is now a LineString (the centerline)
 
 # Create the directed multigraph
 def create_graph(lanes, intersections):
@@ -199,10 +168,11 @@ def create_graph(lanes, intersections):
                     #debug
                     if l_node_id[0] == 1 or e_node_id[0] == 1:
                         print(l_node_id, e_node_id)
-                    
-                    # For the edges that are inside the intersection, assign the distance to be 5.0 meters and
-                    # street name is None
-                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
+
+                    # Need to tweak the geometry, but can be done later (TODO)
+                    # after the graph seems ok.
+                    # This is just placeholder geometry for now.
+                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry, centerline=centerline_from_lane_polygon(e_geometry))
     
 
     # Create edges outside the intersections (basically add the lanes)
@@ -221,34 +191,30 @@ def create_graph(lanes, intersections):
             node_one_id_tuple = popped_node[0]
 
             lane_geometry = None
-            distance = None
-            street_name = None
             # Get the lane geometry from the lanes defaultdict
             for l in lanes[road_id]:
                 if l.get('lane_id') == lane_id:
                     lane_geometry = l.get('geometry')
-                    distance = l.get('distance')
-                    street_name = l.get('street_name')
                     break  
 
-            
+            centerline_geometry = centerline_from_lane_polygon(lane_geometry)
             
             if not node_data['is_entering']:
-                G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry, distance=distance, street_name=street_name)
+                G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry, centerline=centerline_geometry)
             else:
-                G.add_edge(node_one_id_tuple, id_tuple, geometry = lane_geometry, distance=distance, street_name=street_name)
+                G.add_edge(node_one_id_tuple, id_tuple, geometry = lane_geometry, centerline=centerline_geometry)
         else:
             observables[observable_tuple] = node    
 
     return G
 
 # Main function to construct the graph from geojson files
-def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_path):
+def build_city_graph(lane_geojson_file, intersection_geojson_file):
     # Load and parse the geojson files
     lanes_geojson = load_geojson(lane_geojson_file)
     intersections_geojson = load_geojson(intersection_geojson_file)
 
-    lanes = parse_lanes(lanes_geojson, osm_xml_file_path)
+    lanes = parse_lanes(lanes_geojson)
     intersections = parse_intersections(intersections_geojson, lanes)
 
     # Create the directed multigraph
@@ -270,7 +236,17 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
         geometry = data['geometry']
         if geometry:
             # Get the coordinates of the polygon
-            coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates            
+            coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
+            '''
+            folium.Polygon(
+                locations=[(coord[1], coord[0]) for coord in coordinates],
+                color='blue',
+                fill=True,
+                fill_color='blue',
+                fill_opacity=0.5,
+                popup=f'Node {node}'
+            ).add_to(m)
+            '''
             if visualize_nodes:
                 folium.Marker(
                     location=(coordinates[0][1] + random.uniform(-0.00003, 0.00003), coordinates[0][0] + random.uniform(-0.00003, 0.00003)),
@@ -281,8 +257,6 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
     # Add edges to the map (assuming edges are also polygons)
     for u, v, data in G.edges(data=True):
         geometry = data['geometry']
-        distance = data['distance']
-        street_name = data['street_name']
         if geometry:
             coordinates = list(geometry.exterior.coords)  # Taking the first polygon's coordinates
             folium.Polygon(
@@ -293,7 +267,7 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
                 fill=True,
                 fill_color='red',
                 fill_opacity=0.5,
-                popup=f'Edge from {u} to {v}\nDistance: {distance} meters\nStreet name: {street_name}'
+                popup=f'Edge from {u} to {v}'
             ).add_to(m)
     
     # Save the map as an html file
@@ -307,9 +281,37 @@ def visualize_path(folium_map_object, G, path):
     for order, node in enumerate(path):
         
         if order == len(path) - 1:
-            break        
+            break
+        
+        '''
+        # function to get the arithmetic mean value of the list
+        get_avg = lambda numbers: sum(numbers) / len(numbers) if numbers else 0
 
-        next_node_id = path[order + 1]        
+        
+        node_geometry = G.nodes[node]['geometry']
+
+        start_coordinates = list(node_geometry.exterior.coords)  # Taking the first polygon's coordinates
+        y_start_coords = []
+        x_start_coords = []
+        for coord in start_coordinates:
+            y_start_coords.append(coord[1])
+            x_start_coords.append(coord[0])        
+        avg_start_coordinates = (get_avg(y_start_coords), get_avg(x_start_coords))
+        '''
+
+        next_node_id = path[order + 1]
+        #next_node = G.nodes[next_node_id]        
+        '''
+        nn_geometry = next_node['geometry']
+
+        end_coordinates = list(nn_geometry.exterior.coords)
+        y_end_coords = []
+        x_end_coords = []
+        for coord in end_coordinates:
+            y_end_coords.append(coord[1])
+            x_end_coords.append(coord[0])
+        avg_end_coordinates = (get_avg(y_end_coords), get_avg(x_end_coords))
+        '''
 
         #print(node, next_node_id)
         # Such edge has to exist, otherwise something is wrong
@@ -555,15 +557,15 @@ def visualize_path(folium_map_object, G, path):
 
     
         
+
+
 folder_path = 'map_files/observable_geojson_files/'
 
 lane_geojson_file = folder_path + 'Lane_polygons.geojson'
 intersection_geojson_file = folder_path + 'Intersection_polygons.geojson'
 
-osm_file_path = 'map_files/osm_observable.xml'
-
 # Build the graph
-G = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
+G = build_city_graph(lane_geojson_file, intersection_geojson_file)
 
 def get_boundaries(geojson_boundaries):
     lats = []
@@ -600,7 +602,7 @@ except:
 # 1) Filter out all such nodes from the graph, which have no outgoing edges.
 # 2) Filter out all such edges from the graph, which had removed node as part of it.
 # 3) Repeat steps 1-2 until there are no such nodes left in the graph, which have no outgoing edges.
-# 4) Find the shortest path for visiting each edge at least once.
+# 4) Perform depth first search on the graph to find the shortest path for visiting each edge at least once.
         
     #print(G.edges)
     # Counter is just for debugging purposes
@@ -623,33 +625,135 @@ except:
         counter += 1
         G.remove_nodes_from(nodes_to_remove)       
     
-    print(nx.is_strongly_connected(G))
     visualized_graph = visualize_graph(G, map_boundaries, "debug_map", visualize_nodes=False) 
 
 
-    def calculate_surplus_and_deficit(graph):        
+    def calculate_surplus_and_deficit(graph, traversal_counts = None):        
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
-        return None
+        in_degrees = defaultdict(int)
+        out_degrees = defaultdict(int)
+        
+        # Calculate the in-degrees and out-degrees
+        for u in graph:
+            out_degrees[u] += len(graph[u])  # Count outgoing edges
+            for v in graph[u]:
+                in_degrees[v] += 1  # Count incoming edges
+        
+        surplus = {}
+        deficit = {}
+        
+        if not traversal_counts is None:
+            # Now adjust the surplus and deficit based on traversal counts
+            for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
+                out_deg = out_degrees[node]
+                in_deg = in_degrees[node]
+                
+                # Account for extra traversals allowed on edges
+                for neighbor in graph[node]:
+                    out_deg += traversal_counts[node][neighbor] - 1  # Adjust for extra traversal counts
+                
+                for neighbor in graph:  # Check for incoming edges
+                    in_deg += traversal_counts[neighbor].get(node) - 1  # Adjust for incoming traversals
+                
+                if out_deg > in_deg:
+                    surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
+                elif in_deg > out_deg:
+                    deficit[node] = in_deg - out_deg  # Node with surplus incoming edges                        
+        else:
+            # Identify surplus and deficit nodes
+            for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
+                out_deg = out_degrees[node]
+                in_deg = in_degrees[node]
+                if out_deg > in_deg:
+                    surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
+                elif in_deg > out_deg:
+                    deficit[node] = in_deg - out_deg  # Node with surplus incoming edges
+        
+        return surplus, deficit
     
     def balance_graph_with_retraced_edges(graph, surplus, deficit):
         """Balance the graph by retracing edges and adjusting traversal counts."""
-        return None
-    
-    def update_surplus_and_deficit(graph, surplus, deficit, traversal_counts):
-        """Calculate surplus and deficit nodes based on in-degree and out-degree and traversal counts."""
-        return None
+        traversal_counts = defaultdict(lambda: defaultdict(int))  # traversal_counts[from][to] = count
+        for u in graph:
+            for v in graph[u]:
+                traversal_counts[u][v] = 1  # Initialize traversal counts
+        
+        # Handle retracing of edges between surplus and deficit nodes
+        for s_node, s_surplus in surplus.items():
+            for d_node, d_deficit in deficit.items():
+                if s_surplus > 0 and d_deficit > 0:
+                    # Use Dijkstra to find the shortest path from s_node to d_node                    
+                    shortest_path = nx.dijkstra_path(nx.DiGraph(graph), s_node, d_node)                    
+                    
+                    # Increment the traversal count for the edges in the path
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i + 1]
+                        traversal_counts[u][v] += 1  # Increment traversal count for this edge
+                        s_surplus -= 1
+                        d_deficit -= 1
+                        if s_surplus == 0 or d_deficit == 0:
+                            break
 
+        return traversal_counts
+    
     def update_graph_traversal_counts(graph, traversal_counts):
         # Handle retracing of edges between surplus and deficit nodes
-        return None
+        for s_node, s_surplus in surplus.items():
+            for d_node, d_deficit in deficit.items():
+                if s_surplus > 0 and d_deficit > 0:
+                    # Use Dijkstra to find the shortest path from s_node to d_node                    
+                    shortest_path = nx.dijkstra_path(nx.DiGraph(graph), s_node, d_node)                    
+                    
+                    # Increment the traversal count for the edges in the path
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i + 1]
+                        traversal_counts[u][v] += 1  # Increment traversal count for this edge
+                        s_surplus -= 1
+                        d_deficit -= 1
+                        if s_surplus == 0 or d_deficit == 0:
+                            break
 
     def backtrack_and_adjust(graph, traversal_counts):
         """Backtrack and adjust the graph until all edges are traversed."""       
-        return None
+        t_counts = traversal_counts 
+        while True:
+            # Recalculate surplus and deficit
+            surplus, deficit = calculate_surplus_and_deficit(graph, t_counts)
+            
+            time.sleep(1)
+            print("-"*10)
+            print(surplus, deficit)
+            print("-"*10)
+            
+            # If there's no surplus or deficit left, break the loop
+            if not surplus and not deficit:
+                break
+            
+            # Balance the graph again by adjusting traversal counts
+            #t_counts = balance_graph_with_retraced_edges(graph, surplus, deficit)
+            update_graph_traversal_counts(graph, t_counts)
+        
+        return t_counts
 
     def construct_weak_eulerian_path(graph, traversal_counts):
         """Construct a weak Eulerian path, visiting every edge at least once using traversal counts."""
-        return None  
+        path = []
+        current_node = next(iter(graph))  # Start at an arbitrary node (or surplus node)
+        
+        # Traverse the graph based on traversal counts
+        while True:
+            # Find the next node to visit based on the traversal count
+            for next_node in graph[current_node]:
+                if traversal_counts[current_node][next_node] > 0:
+                    path.append((current_node, next_node))
+                    traversal_counts[current_node][next_node] -= 1  # Decrement the traversal count
+                    current_node = next_node
+                    break
+            else:
+                # If no more valid edges are found, break the loop
+                break
+        
+        return path    
 
     adj_table = defaultdict(set)    
 
@@ -661,11 +765,21 @@ except:
     for key, value in adj_table.items():
         graph_list[key] = list(value)
 
-    '''
     debug_copy = deepcopy(graph_list)
 
     surplus, deficit = calculate_surplus_and_deficit(graph_list)
     traversal_counts = balance_graph_with_retraced_edges(graph_list, surplus, deficit)    
     traversal_counts = backtrack_and_adjust(graph_list, traversal_counts)
-    path = construct_weak_eulerian_path(graph_list, traversal_counts)    
-    '''
+    path = construct_weak_eulerian_path(graph_list, traversal_counts)
+    print(path) 
+    #print(construct_eulerian_path(graph_list, traversal_counts))
+
+    #mdg = nx.MultiDiGraph(graph_list)
+    #print(nx.has_eulerian_path(mdg))
+    
+    #path = find_chinese_postman_tour_multidigraph(adj_table, G)
+    #print(path)
+
+    #path = dfs_multidigraph(G, adj_table, list(G.nodes)[0])    
+    #print(path)
+    #visualize_path(visualized_graph, G, path)
