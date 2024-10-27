@@ -41,7 +41,7 @@ def parse_osm_file(file_path, way_id):
     tree = ET.parse(file_path)
     root = tree.getroot()
 
-    way = root.find(f"./way[@id='{way_id}]")
+    way = root.find(f"./way[@id='{way_id}']")
     
     nodes = [nd.attrib['ref'] for nd in way.findall('nd')]
     node_coords = []
@@ -629,27 +629,111 @@ except:
 
     def calculate_surplus_and_deficit(graph):        
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
-        return None
+
+        in_degrees = defaultdict(int)
+        out_degrees = defaultdict(int)
+
+        in_degrees = defaultdict(int)
+        out_degrees = defaultdict(int)
+        
+        # Calculate the in-degrees and out-degrees
+        for u in graph:
+            out_degrees[u] += len(graph[u])  # Count outgoing edges
+            for v in graph[u]:
+                in_degrees[v] += 1  # Count incoming edges
+        
+        surplus = {}
+        deficit = {}
+
+        # Identify surplus and deficit nodes
+        for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
+            out_deg = out_degrees[node]
+            in_deg = in_degrees[node]
+            if out_deg > in_deg:
+                surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
+            elif in_deg > out_deg:
+                deficit[node] = in_deg - out_deg  # Node with surplus incoming edges
+
+        return surplus, deficit
     
-    def balance_graph_with_retraced_edges(graph, surplus, deficit):
+    def init_traversal_counts(graph):
+        traversal_counts = defaultdict(lambda: defaultdict(int))
+        for u in graph:
+            for v in graph[u]:
+                traversal_counts[u][v] = 1
+        return traversal_counts
+
+    def balance_graph(G, graph, surplus, deficit, traversal_counts = None):
         """Balance the graph by retracing edges and adjusting traversal counts."""
-        return None
-    
-    def update_surplus_and_deficit(graph, surplus, deficit, traversal_counts):
-        """Calculate surplus and deficit nodes based on in-degree and out-degree and traversal counts."""
-        return None
 
-    def update_graph_traversal_counts(graph, traversal_counts):
+        if not traversal_counts:
+            traversal_counts = init_traversal_counts(graph)
+
         # Handle retracing of edges between surplus and deficit nodes
-        return None
+        for s_node, _ in surplus.items():
+            for d_node, _ in deficit.items():
+                if surplus[s_node] > 0 and deficit[d_node] > 0:
+                    # Use Dijkstra to find the shortest path from s_node to d_node                    
+                    shortest_path = nx.dijkstra_path(G, s_node, d_node)#, G.edges[s_node, d_node]["distance"])                    
+                    
+                    surplus[s_node] -= 1
+                    deficit[d_node] -= 1
 
-    def backtrack_and_adjust(graph, traversal_counts):
-        """Backtrack and adjust the graph until all edges are traversed."""       
-        return None
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i+1]
+                        traversal_counts[u][v] += 1
+        
+        for key in list(surplus.keys()):
+            if surplus[key] == 0:
+                del surplus[key]
+
+        for key in list(deficit.keys()):
+            if deficit[key] == 0:
+                del deficit[key]
+
+        return traversal_counts    
 
     def construct_weak_eulerian_path(graph, traversal_counts):
-        """Construct a weak Eulerian path, visiting every edge at least once using traversal counts."""
-        return None  
+        """
+        Use Hierholzer's algorithm to find an Eulerian path using traversal limits only.
+        """
+            # Initialize a stack to build the path
+        stack = []
+        path = []
+        
+        # Track current traversal counts to ensure we don't exceed traversal limits
+        current_traversal = defaultdict(lambda: defaultdict(int))
+        
+        # Find a starting node with outgoing edges
+        start_node = next((node for node in graph if graph[node]), None)
+        if not start_node:
+            return []
+
+        # Initialize with the start node
+        stack.append(start_node)
+        
+        # Iteratively build the Eulerian path
+        while stack:
+            node = stack[-1]
+
+            # Check if there are unused outgoing edges from the current node
+            found_unvisited = False
+            if node in graph:
+                for next_node in graph[node]:
+                    # Proceed only if we haven't exceeded the traversal limit
+                    if current_traversal[node][next_node] < traversal_counts[node][next_node]:
+                        # Increment traversal count and proceed to next node
+                        current_traversal[node][next_node] += 1
+                        stack.append(next_node)
+                        found_unvisited = True
+                        break
+
+            # If no unvisited edges are left from this node, backtrack
+            if not found_unvisited:
+                path.append(stack.pop())
+
+        # The path is built in reverse order, so we reverse it before returning
+        return path[::-1]
 
     adj_table = defaultdict(set)    
 
@@ -661,11 +745,19 @@ except:
     for key, value in adj_table.items():
         graph_list[key] = list(value)
 
-    '''
-    debug_copy = deepcopy(graph_list)
+    surplus, deficit = calculate_surplus_and_deficit(graph_list)    
+    traversal_counts = balance_graph(G, graph_list, surplus, deficit)
+    eulerian_path = construct_weak_eulerian_path(graph_list, traversal_counts)
 
-    surplus, deficit = calculate_surplus_and_deficit(graph_list)
-    traversal_counts = balance_graph_with_retraced_edges(graph_list, surplus, deficit)    
-    traversal_counts = backtrack_and_adjust(graph_list, traversal_counts)
-    path = construct_weak_eulerian_path(graph_list, traversal_counts)    
-    '''
+    print()
+    print("RESULTS DEBUGGING SECTION")
+    print(traversal_counts)
+    print(len(eulerian_path), len(list(G.nodes)), len(list(G.edges)))
+    for i in range(len(eulerian_path) - 1):
+        start_node = eulerian_path[i]
+        next_node = eulerian_path[i+1]
+        edge = (start_node, next_node)
+        if not G.has_edge(*edge):
+            print("VÄGA HALB!", edge)
+            break    
+    print()
