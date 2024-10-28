@@ -189,20 +189,58 @@ def create_graph(lanes, intersections):
                 entering_nodes.append(node)
             else:
                 leaving_nodes.append(node)
-            
+        
+        used_l_nodes = []
+        l_node_usages = {}
+        for node in leaving_nodes:
+            l_node_usages[node] = 0
+        leaving_nodes_left = len(leaving_nodes)
+        entering_nodes_left = len(entering_nodes)
         if len(entering_nodes) > 0 and len(leaving_nodes) > 0:
             for e_node in entering_nodes:
                 e_node_id, _, e_geometry, _ = e_node                
-                for l_node in leaving_nodes:
-                    l_node_id, _, l_geometry, _ = l_node
+                
+                if len(entering_nodes) < len(leaving_nodes):
+                    edges_per_entering_node = len(leaving_nodes) // len(entering_nodes)                    
 
-                    #debug
-                    if l_node_id[0] == 1 or e_node_id[0] == 1:
-                        print(l_node_id, e_node_id)
-                    
-                    # For the edges that are inside the intersection, assign the distance to be 5.0 meters and
-                    # street name is None
-                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
+                    counter = 0
+                    for l_node in leaving_nodes: 
+                        if e_node != l_node and l_node not in used_l_nodes:
+                            l_node_id, _, _, _ = l_node
+                            G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
+                            counter += 1                            
+                            used_l_nodes.append(l_node)
+                            if counter == edges_per_entering_node:
+                                if leaving_nodes_left == 1:
+                                    leaving_nodes_left -= 1
+                                    counter -= 1                                    
+                                else:
+                                    leaving_nodes_left -= 1
+                                    break                            
+                            else:
+                                leaving_nodes_left -= 1
+
+                else:                    
+                    edges_per_leaving_node = len(entering_nodes) // len(leaving_nodes)                    
+                    for l_node in leaving_nodes:                    
+                        if e_node != l_node and l_node not in used_l_nodes:
+                            l_node_id, _, _, _ = l_node
+
+                            l_node_usages[l_node] += 1
+
+                            # For the edges that are inside the intersection, assign the distance to be 5.0 meters and
+                            # street name is None
+                            G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
+
+                            if l_node_usages[l_node] == edges_per_leaving_node:
+                                if entering_nodes_left == 1:
+                                    l_node_usages[l_node] -= 1
+                                else:
+                                    used_l_nodes.append(l_node)
+
+                                    break
+                
+                entering_nodes_left -= 1
     
 
     # Create edges outside the intersections (basically add the lanes)
@@ -302,38 +340,37 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
     return m
 
 def visualize_path(folium_map_object, G, path):   
-    print() 
 
-    for order, node in enumerate(path):
+    find_avg_coords = lambda coords : (
+        sum(_ for x, _ in coords) / len(coords),
+        sum(_ for _, y in coords) / len(coords)
+    )
+
+    total_distance = 0.0
+
+    for i, edge in enumerate(path):
         
-        if order == len(path) - 1:
-            break        
+        corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
+        distance = corresponding_edge.get('distance')
+        street_name = corresponding_edge.get('street_name')
 
-        next_node_id = path[order + 1]        
+        total_distance += distance
+        
+        start_node_id, end_node_id = edge
+        start_node_data, end_node_data = G.nodes[start_node_id], G.nodes[end_node_id]
+        start_node_coords, end_node_coords = start_node_data.get('geometry').exterior.coords, end_node_data.get('geometry').exterior.coords        
+        avg_start, avg_end = find_avg_coords(start_node_coords), find_avg_coords(end_node_coords)
+        coords = [avg_start, avg_end]
 
-        #print(node, next_node_id)
-        # Such edge has to exist, otherwise something is wrong
-        # as of now, something is wrong, it seems to be an algorithm problem as graph seems ok
-        #print(node, next_node_id)
-        print((node, next_node_id), (node, next_node_id) in G.edges)
-        corresponding_edge = G[node][next_node_id]
-        #print(corresponding_edge)
-        edge_centerline_geometry = list(corresponding_edge.values())[0]['centerline']
-
-        coords = edge_centerline_geometry.exterior.coords
-        #print(coords[1], coords[0])
-
-        polyline = folium.PolyLine(
-            #locations= [avg_start_coordinates, avg_end_coordinates],
-            locations = [coords[1], coords[0]],
-            color = 'blue', 
+        folium.PolyLine(
+            locations = coords,
+            color = 'blue',
             weight = 3,
-            tooltip=f"Order: {order}",
+            tooltip=f"Order: {i}\nDistance: {distance}m\nStreet name: {street_name}",
             opacity = 0,
-        )
-        polyline.add_to(folium_map_object)
+        ).add_to(folium_map_object)        
 
-
+    print(total_distance, "m")
         
     # Add custom JavaScript for animation control
     animation_script = Template("""
@@ -629,59 +666,46 @@ except:
 
     def calculate_surplus_and_deficit(graph):        
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
-
-        in_degrees = defaultdict(int)
-        out_degrees = defaultdict(int)
-
-        in_degrees = defaultdict(int)
-        out_degrees = defaultdict(int)
-        
-        # Calculate the in-degrees and out-degrees
-        for u in graph:
-            out_degrees[u] += len(graph[u])  # Count outgoing edges
-            for v in graph[u]:
-                in_degrees[v] += 1  # Count incoming edges
-        
+    
         surplus = {}
         deficit = {}
 
-        # Identify surplus and deficit nodes
-        for node in set(list(in_degrees.keys()) + list(out_degrees.keys())):
-            out_deg = out_degrees[node]
-            in_deg = in_degrees[node]
-            if out_deg > in_deg:
-                surplus[node] = out_deg - in_deg  # Node with surplus outgoing edges
-            elif in_deg > out_deg:
-                deficit[node] = in_deg - out_deg  # Node with surplus incoming edges
+        for node in graph.nodes():
+            out_degree = graph.out_degree(node)
+            in_degree = graph.in_degree(node)
+            
+            # Calculate the difference between out-degree and in-degree
+            difference = out_degree - in_degree
 
+            # Classify as surplus or deficit based on the difference
+            if difference > 0:
+                surplus[node] = difference  # More outgoing edges than incoming
+            elif difference < 0:
+                deficit[node] = abs(difference)  # More incoming edges than outgoing
+        
         return surplus, deficit
     
-    def init_traversal_counts(graph):
-        traversal_counts = defaultdict(lambda: defaultdict(int))
-        for u in graph:
-            for v in graph[u]:
-                traversal_counts[u][v] = 1
-        return traversal_counts
 
-    def balance_graph(G, graph, surplus, deficit, traversal_counts = None):
-        """Balance the graph by retracing edges and adjusting traversal counts."""
-
-        if not traversal_counts:
-            traversal_counts = init_traversal_counts(graph)
+    def balance_graph(G, surplus, deficit):
+        """Balance the graph by retracing edges and adjusting traversal counts."""        
 
         # Handle retracing of edges between surplus and deficit nodes
-        for s_node, _ in surplus.items():
-            for d_node, _ in deficit.items():
+        for s_node in surplus.keys():
+            for d_node in deficit.keys():
                 if surplus[s_node] > 0 and deficit[d_node] > 0:
-                    # Use Dijkstra to find the shortest path from s_node to d_node                    
-                    shortest_path = nx.dijkstra_path(G, s_node, d_node)#, G.edges[s_node, d_node]["distance"])                    
+                    # Use Dijkstra to find the shortest path from d_node to s_node                    
+                    shortest_path = nx.dijkstra_path(G, d_node, s_node)#, G.edges[d_node, s_node]["distance"])                    
                     
                     surplus[s_node] -= 1
                     deficit[d_node] -= 1
 
                     for i in range(len(shortest_path) - 1):
-                        u, v = shortest_path[i], shortest_path[i+1]
-                        traversal_counts[u][v] += 1
+                        u, v = shortest_path[i], shortest_path[i+1]                        
+
+                        # Add a copy of an existing edge to the graph
+                        edge_key = list(G.get_edge_data(u, v).keys())[0]
+                        edge_attributes = G.get_edge_data(u, v, key=edge_key)
+                        G.add_edge(u, v, **edge_attributes)
         
         for key in list(surplus.keys()):
             if surplus[key] == 0:
@@ -689,51 +713,8 @@ except:
 
         for key in list(deficit.keys()):
             if deficit[key] == 0:
-                del deficit[key]
+                del deficit[key]  
 
-        return traversal_counts    
-
-    def construct_weak_eulerian_path(graph, traversal_counts):
-        """
-        Use Hierholzer's algorithm to find an Eulerian path using traversal limits only.
-        """
-            # Initialize a stack to build the path
-        stack = []
-        path = []
-        
-        # Track current traversal counts to ensure we don't exceed traversal limits
-        current_traversal = defaultdict(lambda: defaultdict(int))
-        
-        # Find a starting node with outgoing edges
-        start_node = next((node for node in graph if graph[node]), None)
-        if not start_node:
-            return []
-
-        # Initialize with the start node
-        stack.append(start_node)
-        
-        # Iteratively build the Eulerian path
-        while stack:
-            node = stack[-1]
-
-            # Check if there are unused outgoing edges from the current node
-            found_unvisited = False
-            if node in graph:
-                for next_node in graph[node]:
-                    # Proceed only if we haven't exceeded the traversal limit
-                    if current_traversal[node][next_node] < traversal_counts[node][next_node]:
-                        # Increment traversal count and proceed to next node
-                        current_traversal[node][next_node] += 1
-                        stack.append(next_node)
-                        found_unvisited = True
-                        break
-
-            # If no unvisited edges are left from this node, backtrack
-            if not found_unvisited:
-                path.append(stack.pop())
-
-        # The path is built in reverse order, so we reverse it before returning
-        return path[::-1]
 
     adj_table = defaultdict(set)    
 
@@ -745,19 +726,12 @@ except:
     for key, value in adj_table.items():
         graph_list[key] = list(value)
 
-    surplus, deficit = calculate_surplus_and_deficit(graph_list)    
-    traversal_counts = balance_graph(G, graph_list, surplus, deficit)
-    eulerian_path = construct_weak_eulerian_path(graph_list, traversal_counts)
+    copied_graph = nx.MultiDiGraph(G)
 
-    print()
-    print("RESULTS DEBUGGING SECTION")
-    print(traversal_counts)
-    print(len(eulerian_path), len(list(G.nodes)), len(list(G.edges)))
-    for i in range(len(eulerian_path) - 1):
-        start_node = eulerian_path[i]
-        next_node = eulerian_path[i+1]
-        edge = (start_node, next_node)
-        if not G.has_edge(*edge):
-            print("VÄGA HALB!", edge)
-            break    
-    print()
+    surplus = {}
+    deficit = {}    
+    surplus, deficit = calculate_surplus_and_deficit(copied_graph)
+    balance_graph(copied_graph, surplus, deficit)                
+    print(nx.is_strongly_connected(copied_graph))
+    eulerian_path = list(nx.eulerian_path(copied_graph))        
+    visualize_path(visualized_graph, G, eulerian_path)
