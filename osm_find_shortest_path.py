@@ -3,10 +3,7 @@ import networkx as nx
 import geojson
 from Intersection import Intersection
 from shapely.geometry import shape
-from shapely import Polygon
 from collections import defaultdict
-from itertools import combinations
-from copy import deepcopy
 
 # Graph visualization
 import folium
@@ -16,9 +13,17 @@ import random
 import xml.etree.ElementTree as ET
 
 # For calculating the length of a road based on its coordinates
+from shapely.geometry import Polygon, MultiLineString, LineString
+from shapely.ops import unary_union
 from geopy.distance import geodesic
+import numpy as np
+from scipy.spatial import Voronoi
 
 import time
+
+
+### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
+total_streets_length = 0.0
 
 
 # Load GeoJSON files
@@ -41,19 +46,12 @@ def parse_osm_file(file_path, way_id):
     tree = ET.parse(file_path)
     root = tree.getroot()
 
-    way = root.find(f"./way[@id='{way_id}']")
-    
-    nodes = [nd.attrib['ref'] for nd in way.findall('nd')]
-    node_coords = []
-    for node_id in nodes:
-        node = root.find(f"./node[@id='{node_id}']")
-        lat = float(node.attrib['lat'])
-        lon = float(node.attrib['lon'])
-        node_coords.append((lat, lon))
+    way = root.find(f"./way[@id='{way_id}']")    
 
-    tags = {tag.attrib['k']: tag.attrib['v'] for tag in way.findall('tag')}
-    street_name = tags.get('addr:street')
-    return node_coords, street_name
+    tags = {tag.attrib['k']: tag.attrib['v'] for tag in way.findall('tag')}    
+    street_name = tags.get('name', None)
+    return street_name
+
 
 def find_lane_distance(node_coords):
 
@@ -75,8 +73,7 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
 
             # Find out the lane's distance
             osm_way_id = lane['properties']['osm_way_ids'][0]
-            node_coords, street_name = parse_osm_file(osm_xml_file_path, osm_way_id)            
-            distance = find_lane_distance(node_coords)
+            street_name = parse_osm_file(osm_xml_file_path, osm_way_id)                        
 
             lane_data = {
                 'road_id': lane['properties']['road'], 
@@ -85,7 +82,6 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
                 'src_i': None, # value will be added in parse_intersections
                 'dst_i': None, # value will be added in parse_intersections
                 'geometry': shape(lane['geometry']),
-                'distance': distance,
                 'street_name': street_name,
             }
             lanes_by_road_id[lane_data['road_id']].append(lane_data)  # Group lanes by road_id
@@ -118,8 +114,19 @@ def parse_intersections(intersection_geojson, all_lanes):
 
     return intersections
 
+def get_twonodes_average_coords(G, start_node, end_node):
+    find_avg_coords = lambda coords : (
+        sum(y for _, y in coords) / len(coords),
+        sum(x for x, _ in coords) / len(coords)
+    )
+    start_node_data, end_node_data = G.nodes[start_node], G.nodes[end_node]
+    start_node_coords, end_node_coords = start_node_data.get('geometry').exterior.coords, end_node_data.get('geometry').exterior.coords        
+    avg_start, avg_end = find_avg_coords(start_node_coords), find_avg_coords(end_node_coords)
+    return [avg_start, avg_end]
+
 # Create the directed multigraph
 def create_graph(lanes, intersections):
+    global total_streets_length
 
     G = nx.MultiDiGraph()
 
@@ -163,12 +170,7 @@ def create_graph(lanes, intersections):
                 # Also add the info, if the node for the current lane is for entering or leaving the intersection
                 is_entering_value = False                
                 if (lane['dst_i'] == id and lane['direction'] == 'Forward') or (lane['src_i'] == id and lane['direction'] == 'Backward'):
-                    is_entering_value = True        
-                
-                # debug
-                if id == 1 or id == 22:
-                    print(node_id, is_entering_value)        
-
+                    is_entering_value = True
 
                 tuples.add((node_id, is_entering_value, intersection.geometry, id))
                 G.add_node(node_id, is_entering=is_entering_value, geometry=intersection.geometry, intersection_id=id)
@@ -177,7 +179,7 @@ def create_graph(lanes, intersections):
         intersections_node_map[id] = tuples
 
         # debug
-        print(f"Nodes in intersection {id}: {counter}")
+        #print(f"Nodes in intersection {id}: {counter}")
     
     # Create edges inside the intersection
     for _, nodes in intersections_node_map.items():        
@@ -189,58 +191,18 @@ def create_graph(lanes, intersections):
                 entering_nodes.append(node)
             else:
                 leaving_nodes.append(node)
-        
-        used_l_nodes = []
-        l_node_usages = {}
-        for node in leaving_nodes:
-            l_node_usages[node] = 0
-        leaving_nodes_left = len(leaving_nodes)
-        entering_nodes_left = len(entering_nodes)
+            
         if len(entering_nodes) > 0 and len(leaving_nodes) > 0:
             for e_node in entering_nodes:
                 e_node_id, _, e_geometry, _ = e_node                
-                
-                if len(entering_nodes) < len(leaving_nodes):
-                    edges_per_entering_node = len(leaving_nodes) // len(entering_nodes)                    
+                for l_node in leaving_nodes:
+                    l_node_id, _, l_geometry, _ = l_node                    
+                    
+                    # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
+                    # street name is None
 
-                    counter = 0
-                    for l_node in leaving_nodes: 
-                        if e_node != l_node and l_node not in used_l_nodes:
-                            l_node_id, _, _, _ = l_node
-                            G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
-                            counter += 1                            
-                            used_l_nodes.append(l_node)
-                            if counter == edges_per_entering_node:
-                                if leaving_nodes_left == 1:
-                                    leaving_nodes_left -= 1
-                                    counter -= 1                                    
-                                else:
-                                    leaving_nodes_left -= 1
-                                    break                            
-                            else:
-                                leaving_nodes_left -= 1
-
-                else:                    
-                    edges_per_leaving_node = len(entering_nodes) // len(leaving_nodes)                    
-                    for l_node in leaving_nodes:                    
-                        if e_node != l_node and l_node not in used_l_nodes:
-                            l_node_id, _, _, _ = l_node
-
-                            l_node_usages[l_node] += 1
-
-                            # For the edges that are inside the intersection, assign the distance to be 5.0 meters and
-                            # street name is None
-                            G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=5.0, street_name=None)
-
-                            if l_node_usages[l_node] == edges_per_leaving_node:
-                                if entering_nodes_left == 1:
-                                    l_node_usages[l_node] -= 1
-                                else:
-                                    used_l_nodes.append(l_node)
-
-                                    break
-                
-                entering_nodes_left -= 1
+                    total_streets_length += 4.0
+                    G.add_edge(e_node_id, l_node_id, geometry=e_geometry, distance=4.0, street_name=None)
     
 
     # Create edges outside the intersections (basically add the lanes)
@@ -258,19 +220,20 @@ def create_graph(lanes, intersections):
             popped_node = observables.pop(observable_tuple)
             node_one_id_tuple = popped_node[0]
 
-            lane_geometry = None
-            distance = None
+            lane_geometry = None            
             street_name = None
             # Get the lane geometry from the lanes defaultdict
             for l in lanes[road_id]:
                 if l.get('lane_id') == lane_id:
-                    lane_geometry = l.get('geometry')
-                    distance = l.get('distance')
+                    lane_geometry = l.get('geometry')                    
                     street_name = l.get('street_name')
                     break  
 
+            coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
+            distance = find_lane_distance(coords)
             
-            
+            total_streets_length += distance
+
             if not node_data['is_entering']:
                 G.add_edge(id_tuple, node_one_id_tuple, geometry = lane_geometry, distance=distance, street_name=street_name)
             else:
@@ -341,11 +304,6 @@ def visualize_graph(G, map_boundaries, file_name="city_graph_map", visualize_nod
 
 def visualize_path(folium_map_object, G, path):   
 
-    find_avg_coords = lambda coords : (
-        sum(_ for x, _ in coords) / len(coords),
-        sum(_ for _, y in coords) / len(coords)
-    )
-
     total_distance = 0.0
 
     for i, edge in enumerate(path):
@@ -357,10 +315,7 @@ def visualize_path(folium_map_object, G, path):
         total_distance += distance
         
         start_node_id, end_node_id = edge
-        start_node_data, end_node_data = G.nodes[start_node_id], G.nodes[end_node_id]
-        start_node_coords, end_node_coords = start_node_data.get('geometry').exterior.coords, end_node_data.get('geometry').exterior.coords        
-        avg_start, avg_end = find_avg_coords(start_node_coords), find_avg_coords(end_node_coords)
-        coords = [avg_start, avg_end]
+        coords = get_twonodes_average_coords(G, start_node_id, end_node_id)
 
         folium.PolyLine(
             locations = coords,
@@ -370,7 +325,10 @@ def visualize_path(folium_map_object, G, path):
             opacity = 0,
         ).add_to(folium_map_object)        
 
-    print(total_distance, "m")
+    print()
+    print(f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(total_distance, 4)}m")
+    print("Coefficient:", round(total_distance/total_streets_length, 4))
+    print()
         
     # Add custom JavaScript for animation control
     animation_script = Template("""
@@ -629,8 +587,9 @@ visualize_graph(G, map_boundaries)
 
 # Try to get the eulerian path of the graph
 try:
-    eulerian_path = list(nx.eulerian_path(G))    
-    print(eulerian_path)
+    eulerian_path = list(nx.eulerian_path(G))  
+    visualized_graph = visualize_graph(G, map_boundaries, "debug_map", visualize_nodes=False)   
+    visualize_path(visualized_graph, G, eulerian_path)
 
 except:
 # If the eulerian path doesn't exist, we need to do the following:
@@ -660,7 +619,7 @@ except:
         counter += 1
         G.remove_nodes_from(nodes_to_remove)       
     
-    print(nx.is_strongly_connected(G))
+    #print(nx.is_strongly_connected(G))
     visualized_graph = visualize_graph(G, map_boundaries, "debug_map", visualize_nodes=False) 
 
 
@@ -732,6 +691,6 @@ except:
     deficit = {}    
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
     balance_graph(copied_graph, surplus, deficit)                
-    print(nx.is_strongly_connected(copied_graph))
+    #print(nx.is_strongly_connected(copied_graph)) # for debugging
     eulerian_path = list(nx.eulerian_path(copied_graph))        
     visualize_path(visualized_graph, G, eulerian_path)
