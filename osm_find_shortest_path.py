@@ -827,6 +827,4 @@ except:
     
     A potential drawback:
     This can shift the balance of the nodes.
-    
-    We can ensure the balancability of the graph 
     '''
