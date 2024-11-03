@@ -110,8 +110,7 @@ def parse_intersections(intersection_geojson, all_lanes):
     intersections = set()
 
     for feature in intersection_geojson["features"]:
-        i_type = feature["properties"]["type"]
-
+        i_type = feature["properties"]["type"]        
         if i_type == "road":
             # If the intersection type is road, then we can assign the src and dst intersections to lanes
 
@@ -121,12 +120,17 @@ def parse_intersections(intersection_geojson, all_lanes):
                 lane["src_i"] = feature["properties"]["src_i"]
                 lane["dst_i"] = feature["properties"]["dst_i"]
 
-        elif i_type == "intersection" or i_type == "fork":
+        elif i_type == "intersection":            
+            #int_kind = feature["properties"]["intersection_kind"]            
             if feature["properties"]["intersection_kind"] != "MapEdge":
+                #if int_kind != "Intersection":
+                    #print(int_kind)
+                #if feature["properties"]["movements"]:
                 intersection = Intersection(
                     feature["properties"]["id"],
                     feature["properties"]["movements"],
                     shape(feature["geometry"]),
+                    feature["properties"]["intersection_kind"]
                 )
                 intersections.add(intersection)                
         else:
@@ -153,9 +157,7 @@ def get_twonodes_average_coords(G, start_node, end_node):
 
 
 # Create the directed multigraph
-def create_graph(lanes, intersections):
-    global total_streets_length
-
+def create_graph(lanes, intersections):    
     G = nx.MultiDiGraph()
 
     # Added nodes, which are grouped by their intersection
@@ -178,7 +180,7 @@ def create_graph(lanes, intersections):
             src_id = int(src_road.split("#")[-1])
             unique_roads.add(src_id)
 
-        counter = 0
+        #counter = 0
 
         tuples = set()
         for ur in unique_roads:
@@ -202,10 +204,7 @@ def create_graph(lanes, intersections):
                 if (lane["dst_i"] == id and lane["direction"] == "Forward") or (
                     lane["src_i"] == id and lane["direction"] == "Backward"
                 ):
-                    is_entering_value = True                
-                
-                if not intersection.geometry:
-                    print("suur viga!", node_id)
+                    is_entering_value = True                                
                 
                 tuples.add((node_id, is_entering_value, intersection.geometry, id))
                 G.add_node(
@@ -214,14 +213,9 @@ def create_graph(lanes, intersections):
                     geometry=intersection.geometry,
                     intersection_id=id,
                 )
-                counter += 1
+                #counter += 1
 
         intersections_node_map[id] = tuples
-
-        # debug
-        # print(f"Nodes in intersection {id}: {counter}")
-    
-    #special_nodes = [(22,16,0),(22,16,1),(1,16,1),(1,16,0),(23,20,0),(23,20,1),(16,20,0),(16,20,1)]
     
     # Create edges inside the intersection
     for _, nodes in intersections_node_map.items():
@@ -241,34 +235,25 @@ def create_graph(lanes, intersections):
                     l_node_id, _, l_geometry, _ = l_node                    
                     
                     # Dont add backward turns to intersection
-                    if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]: #and (l_node not in special_nodes and e_node not in special_nodes):
-                        continue
-                    
-                    if not e_geometry:
-                        print("suuR Viga!", e_node_id)
-                        
-                    if not l_geometry:
-                        print("SUUR VIGA!", l_node_id)
+                    if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
+                        continue                    
 
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
-                    # street name is None
-
-                    total_streets_length += 4.0
+                    # street name is None                    
                     G.add_edge(
                         e_node_id,
                         l_node_id,
                         geometry=e_geometry,
                         distance=4.0,
                         street_name=None,
+                        edge_type="intersection",
                     )
 
     # Create edges outside the intersections (basically add the lanes)
     # We need to create an edge between all such nodes, which have the same road and lane id
     observables = {}
     for node in G.nodes(data=True):
-        # print(node)
         id_tuple, node_data = node
-        # print(id_tuple)
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
 
@@ -289,8 +274,6 @@ def create_graph(lanes, intersections):
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
             distance = find_lane_distance(coords)
 
-            total_streets_length += distance
-
             if not node_data["is_entering"]:
                 G.add_edge(
                     id_tuple,
@@ -306,6 +289,7 @@ def create_graph(lanes, intersections):
                     geometry=lane_geometry,
                     distance=distance,
                     street_name=street_name,
+                    edge_type="road",
                 )
         else:
             observables[observable_tuple] = node
@@ -393,7 +377,7 @@ def visualize_path(folium_map_object, G, path):
     for i, edge in enumerate(path):
 
         corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
-        print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
+        #print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
         distance = corresponding_edge.get("distance", 0.0)
         street_name = corresponding_edge.get("street_name", None)
 
@@ -702,28 +686,38 @@ except:
         G = G.subgraph(largest_component).copy()
         print(G)
 
-    # print(G.edges)
-    # Counter is just for debugging purposes
-    counter = 0
-    while True:
-
-        nodes_to_remove = []
-
-        # print()
-        for node in G.nodes:
-            # print(node, G.out_degree(node))
-            if G.out_degree(node) == 0:
-
+    in_counter = 0
+    out_counter = 0
+    nodes_to_remove = []
+    for node in G.nodes:
+        # Remove the dead ends.
+        if G.out_degree(node) == 0:
+            if G.in_degree(node) == 1 and in_counter == 0:
+                in_counter += 1
+            else:
                 nodes_to_remove.append(node)
-            if G.in_degree(node) == 0:
-                nodes_to_remove.append(node)
-        # print()
-
-        if len(nodes_to_remove) == 0 or counter > 0:
-            break
-
-        #counter += 1
-        G.remove_nodes_from(nodes_to_remove)
+        #if G.in_degree(node) == 0:
+            #if G.out_degree(node) == 1 and out_counter == 0:
+                #out_counter += 1
+            #else:
+                #nodes_to_remove.append(node)
+    G.remove_nodes_from(nodes_to_remove)
+    
+    
+    ###
+    # Remove edges inside the intersections
+    ###
+    edges = list(G.edges(data=True))
+    for u, v, data in edges:
+        if data.get('edge_type') == 'intersection':
+            if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
+                G.remove_edge(u, v)
+                if not nx.is_strongly_connected(G):
+                    G.add_edge(u, v, **data)
+    
+    # Calculate the total street distance
+    for u, v, data in G.edges(data=True):
+        total_streets_length += data.get("distance")
 
     # print(nx.is_strongly_connected(G))
     visualized_graph = visualize_graph(
@@ -812,19 +806,4 @@ except:
     start_node = balance_graph(copied_graph, surplus, deficit)
     # print(nx.is_strongly_connected(copied_graph)) # for debugging
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
-    visualize_path(visualized_graph, G, eulerian_path)
-    
-    '''
-    TODO
-    
-    A potentiallly good way to have less edges inside the intersections:
-    1) Find out all non-bridge edges (you can remove the edge and still preserve the graph's
-        strong connectivity) in the graph.
-    2) For each intersection, we would ideally want to have one edge per intersection lane.
-        For identifying, which edges we can remove, while still keeping the strong connectivity of the graph,
-        we can check if an edge, which is a candidate for removal, is a non-bridge edge.
-        So for each intersection, we can reduce the number of lanes, while still keeping the graph's strong connectivity.
-    
-    A potential drawback:
-    This can shift the balance of the nodes.
-    '''
+    visualize_path(visualized_graph, G, eulerian_path)    

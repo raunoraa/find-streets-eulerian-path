@@ -1,8 +1,9 @@
 class Intersection:
-    def __init__(self, id, movements, geometry):
+    def __init__(self, id, movements, geometry, int_type):
         self.id = id
         self.movements = movements
         self.geometry = geometry
+        self.int_type = int_type
     
     def __hash__(self):
         # Immutable identifier for hashing (id is unique)
