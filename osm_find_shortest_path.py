@@ -1,8 +1,12 @@
 from jinja2 import Template
 import networkx as nx
 import geojson
+from shapely import Point
 from Intersection import Intersection
 from shapely.geometry import shape
+from shapely.geometry import LineString
+from shapely.geometry import Polygon
+from shapely.ops import nearest_points
 from collections import defaultdict
 
 # Graph visualization
@@ -147,15 +151,34 @@ def get_twonodes_average_coords(G, start_node, end_node):
     )
     start_node_data, end_node_data = G.nodes[start_node], G.nodes[end_node]
     start_node_coords, end_node_coords = (
-        start_node_data.get("geometry").exterior.coords,
-        end_node_data.get("geometry").exterior.coords,
+        start_node_data.get("geometry").coords,
+        end_node_data.get("geometry").coords,
     )
     avg_start, avg_end = find_avg_coords(start_node_coords), find_avg_coords(
         end_node_coords
     )
     return [avg_start, avg_end]
 
+def get_closest_edge_midpoint(polygon1, polygon2):
+    #closest_point1, closest_point2 = nearest_points(polygon1, polygon2)
+    
+    closest_point = None
+    min_distance = float('inf')
+    
+    # Step 1: Find the closest pair of vertices between polygon1 and polygon2 using geodesic distance
+    for coord1 in polygon1.exterior.coords:
+        for coord2 in polygon2.exterior.coords:
+            # Calculate the geodesic distance between coord1 and coord2
+            distance = geodesic(coord1[::-1], coord2[::-1]).meters  # Reverse coord1/coord2 for (lat, lon)
+            
+            # Update the closest points if this pair is closer
+            if distance < min_distance:
+                min_distance = distance
+                closest_point1 = Point(coord1)                
+        
+    return closest_point1
 
+    
 # Create the directed multigraph
 def create_graph(lanes, intersections):    
     G = nx.MultiDiGraph()
@@ -179,8 +202,6 @@ def create_graph(lanes, intersections):
             # so we can take unique ones only from source or destination
             src_id = int(src_road.split("#")[-1])
             unique_roads.add(src_id)
-
-        #counter = 0
 
         tuples = set()
         for ur in unique_roads:
@@ -206,14 +227,17 @@ def create_graph(lanes, intersections):
                 ):
                     is_entering_value = True                                
                 
-                tuples.add((node_id, is_entering_value, intersection.geometry, id))
+                lane_geometry = lane.get("geometry")                 
+                int_node_geometry = get_closest_edge_midpoint(lane_geometry, intersection.geometry)
+                
+                tuples.add((node_id, is_entering_value, int_node_geometry, id)) #intersection.geometry, id))
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
-                    geometry=intersection.geometry,
+                    #geometry=intersection.geometry,
+                    geometry = int_node_geometry,
                     intersection_id=id,
                 )
-                #counter += 1
 
         intersections_node_map[id] = tuples
     
@@ -243,7 +267,7 @@ def create_graph(lanes, intersections):
                     G.add_edge(
                         e_node_id,
                         l_node_id,
-                        geometry=e_geometry,
+                        geometry=LineString([e_geometry, l_geometry]),
                         distance=4.0,
                         street_name=None,
                         edge_type="intersection",
@@ -330,7 +354,7 @@ def visualize_graph(
         if geometry:
             # Get the coordinates of the polygon
             coordinates = list(
-                geometry.exterior.coords
+                geometry.coords
             )  # Taking the first polygon's coordinates
             if visualize_nodes:
                 folium.Marker(
@@ -346,13 +370,18 @@ def visualize_graph(
 
     # Add edges to the map (assuming edges are also polygons)
     for u, v, data in G.edges(data=True):
-        geometry = data.get("geometry", None)
-        distance = data.get("distance", 0.0)
+        geometry = data.get("geometry")
+        distance = data.get("distance")        
         street_name = data.get("street_name", None)
         if geometry:
-            coordinates = list(
-                geometry.exterior.coords
-            )  # Taking the first polygon's coordinates
+            coordinates = None
+            if isinstance(geometry, Polygon):
+                coordinates = list(
+                    geometry.exterior.coords
+                )
+            elif isinstance(geometry, LineString):
+                buffered_line = geometry.buffer(0.000001)
+                coordinates = list(buffered_line.exterior.coords)
             folium.Polygon(
                 locations=[(coord[1], coord[0]) for coord in coordinates],
                 color="black",
@@ -389,8 +418,15 @@ def visualize_path(folium_map_object, G, path):
         folium.PolyLine(
             locations=coords,
             color="blue",
-            weight=3,
+            weight=10,
             tooltip=f"Order: {i}\nDistance: {distance}m\nStreet name: {street_name}",
+            opacity=0,
+        ).add_to(folium_map_object)
+        
+        folium.PolyLine(
+            locations=coords,
+            color="orange",
+            weight=3,
             opacity=0,
         ).add_to(folium_map_object)
 
@@ -401,11 +437,14 @@ def visualize_path(folium_map_object, G, path):
     print("Coefficient:", round(total_distance / total_streets_length, 4))
     print()
 
+    # Add the Leaflet PolylineDecorator library (not using it at the moment)
+    # folium_map_object.get_root().html.add_child(folium.Element("<script src='https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js'></script>"))   
+    
     # Add custom JavaScript for animation control
     animation_script = Template(
         """
     <script>    
-    window.onload = function() {                       
+    document.addEventListener("DOMContentLoaded", function() {                       
                                 
         let map = Object.values(window).find(v => v instanceof L.Map); // this is Folium's default map variable;        
 
@@ -415,46 +454,44 @@ def visualize_path(folium_map_object, G, path):
         let playing = false;
                                 
         let infoText = document.getElementById('info-text');
-
-        /*
-        // Add an SVG marker definition for an arrowhead
-        let svgNS = "http://www.w3.org/2000/svg";
-        let arrowDef = document.createElementNS(svgNS, "marker");
-        arrowDef.setAttribute("id", "arrow");
-        arrowDef.setAttribute("markerWidth", "10");
-        arrowDef.setAttribute("markerHeight", "10");
-        arrowDef.setAttribute("refX", "10");
-        arrowDef.setAttribute("refY", "3");
-        arrowDef.setAttribute("orient", "auto");
-        arrowDef.setAttribute("markerUnits", "strokeWidth");
-
-        // Create the actual arrowhead path
-        let arrowPath = document.createElementNS(svgNS, "path");
-        arrowPath.setAttribute("d", "M0,0 L0,6 L9,3 z"); // Simple triangle for the arrow
-        arrowPath.setAttribute("fill", "yellow");  // Same color as the polyline
-
-        // Append the arrowhead to the marker definition
-        arrowDef.appendChild(arrowPath);
-
-        // Add the marker to the map's SVG layer
-        let svgDefs = document.createElementNS(svgNS, "defs");
-        svgDefs.appendChild(arrowDef);
-        map.getPanes().overlayPane.querySelector("svg").appendChild(svgDefs);
-        */
-                                
-                                
-        //let polylines = document.querySelectorAll(".leaflet-interactive");
+                             
         let polylines = [];
+        let orange_polylines = [];
+        //let polyline_layers = [];
         map.eachLayer(function(layer) {
             if(layer instanceof L.Polyline) {                
-                if(layer["_path"].getAttribute("stroke") === "blue")                    
+                if(layer["_path"].getAttribute("stroke") === "blue") {
                     //layer["_path"].setAttribute("marker-end", "url(#arrow)"); // Add the arrowhead to the end of the line
                     polylines.push(layer["_path"]);
+                    //polyline_layers.push(layer); // Push the actual L.Polyline layer for decoration
+                }
+                else{
+                    if (layer["_path"].getAttribute("stroke") === "orange") {
+                        orange_polylines.push(layer["_path"]);
+                    }
+                }
             }
-        });                                                                                                      
-                            
+        });                                                                                                             
+
+        /*
+        for(const polyline of polyline_layers) {               
+            // Use PolylineDecorator to add arrows to the polyline
+            L.polylineDecorator(polyline, {
+                patterns: [
+                    {
+                        offset: '10%',  // Adjust this to position arrows along the polyline
+                        repeat: 0,  // No repetition
+                        symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: true, pathOptions: { color: 'blue', fillOpacity: 0, opacity: 0 } })
+                    }
+                        ]
+            }).addTo(map);
+            
+            console.log(polyline);
+        };
+        */    
         
         let prev_polyline = null;
+        let prev_orange = null;
 
         let delay = 500;  // 500 ms delay between segments
         const delaySlider = document.getElementById('delay-slider');
@@ -488,11 +525,15 @@ def visualize_path(folium_map_object, G, path):
                 prev_polyline.setAttribute("stroke", "blue");
             }
 
-            let polyline = polylines[currentStep];
+            let polyline = polylines[currentStep];            
             if (polyline) {
+                let orange_polyline = orange_polylines[currentStep];
                 polyline.setAttribute("stroke-opacity", 1);  // Show the polyline
                 polyline.setAttribute("stroke", "white");
                 prev_polyline = polyline;
+                
+                orange_polyline.setAttribute("stroke-opacity", 1);
+                prev_orange = orange_polyline;
             }
             currentStep++;
             
@@ -503,11 +544,7 @@ def visualize_path(folium_map_object, G, path):
         }
                                 
         function animateStep(){
-            if(playing) return; // Only let it animate the step, when it is not auto-playing.
-            //if(currentStep >= polylines.length) {
-                //infoText.textContent = "Finished!";
-                //return;
-            //}  // Stop here when the end is reached   
+            if(playing) return; // Only let it animate the step, when it is not auto-playing.            
             console.log(prevStep + " " + currentStep)  ;
                                 
             if (prev_polyline) {
@@ -581,7 +618,7 @@ def visualize_path(folium_map_object, G, path):
         document.getElementById('play-button').onclick = function() { playAnimation(); };
         document.getElementById('pause-button').onclick = function() { pauseAnimation(); };
         document.getElementById('restart-button').onclick = function() { resetAnimation(); playAnimation(); };
-    };
+    });
     </script>
     """
     ).render()
