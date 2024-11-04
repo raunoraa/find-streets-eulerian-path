@@ -384,7 +384,7 @@ def visualize_graph(
             if isinstance(geometry, Polygon):
                 coordinates = list(geometry.exterior.coords)
             elif isinstance(geometry, LineString):
-                buffered_line = geometry.buffer(0.000001)
+                buffered_line = geometry.buffer(0.000005)
                 coordinates = list(buffered_line.exterior.coords)
             folium.Polygon(
                 locations=[(coord[1], coord[0]) for coord in coordinates],
@@ -704,62 +704,62 @@ print("BOUNDARY PARSING FINISHED!")
 # Find the shortest path to visit each graph edge at least once
 ###
 
+
+if not nx.is_strongly_connected(G):
+    components = list(nx.strongly_connected_components(G))
+    largest_component = max(
+        components, key=lambda c: (len(c), G.subgraph(c).size())
+    )
+    # print(G)
+    G = G.subgraph(largest_component).copy()
+    print(G)
+
+in_counter = 0
+out_counter = 0
+nodes_to_remove = []
+for node in G.nodes:
+    # Remove the dead ends.
+    if G.out_degree(node) == 0:
+        if G.in_degree(node) == 1 and in_counter == 0:
+            in_counter += 1
+        else:
+            nodes_to_remove.append(node)
+    # if G.in_degree(node) == 0:
+    # if G.out_degree(node) == 1 and out_counter == 0:
+    # out_counter += 1
+    # else:
+    # nodes_to_remove.append(node)
+G.remove_nodes_from(nodes_to_remove)
+
+###
+# Remove edges inside the intersections
+###
+edges = list(G.edges(data=True))
+for u, v, data in edges:
+    if data.get("edge_type") == "intersection":
+        if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
+            G.remove_edge(u, v)
+            if not nx.is_strongly_connected(G):
+                G.add_edge(u, v, **data)
+
+# Calculate the total street distance
+for u, v, data in G.edges(data=True):
+    total_streets_length += data.get("distance")
+
+
 # Try to get the eulerian path of the graph
-try:
+try:        
     eulerian_path = list(nx.eulerian_path(G))
+    print("IM HERE!")
     visualized_graph = visualize_graph(
         G, map_boundaries, "debug_map", visualize_nodes=False
     )
     visualize_path(visualized_graph, G, eulerian_path)
 
 except:
-    # If the eulerian path doesn't exist, we need to do the following:
-    # 0) If the graph is not strongly connected, we should look only at the largest strongly connected component
-    # 1) Filter out all such nodes from the graph, which have no outgoing edges or no incoming edges.
-    # 2) Filter out all such edges from the graph, which had removed node as part of it.
-    # 3) Repeat steps 1-2 until there are no such nodes left in the graph, which have no outgoing edges.
-    # 4) Find the shortest path for visiting each edge at least once.
-
-    if not nx.is_strongly_connected(G):
-        components = list(nx.strongly_connected_components(G))
-        largest_component = max(
-            components, key=lambda c: (len(c), G.subgraph(c).size())
-        )
-        # print(G)
-        G = G.subgraph(largest_component).copy()
-        print(G)
-
-    in_counter = 0
-    out_counter = 0
-    nodes_to_remove = []
-    for node in G.nodes:
-        # Remove the dead ends.
-        if G.out_degree(node) == 0:
-            if G.in_degree(node) == 1 and in_counter == 0:
-                in_counter += 1
-            else:
-                nodes_to_remove.append(node)
-        # if G.in_degree(node) == 0:
-        # if G.out_degree(node) == 1 and out_counter == 0:
-        # out_counter += 1
-        # else:
-        # nodes_to_remove.append(node)
-    G.remove_nodes_from(nodes_to_remove)
-
     ###
-    # Remove edges inside the intersections
+    # We need to balance the graph if no eulerian path was found.
     ###
-    edges = list(G.edges(data=True))
-    for u, v, data in edges:
-        if data.get("edge_type") == "intersection":
-            if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
-                G.remove_edge(u, v)
-                if not nx.is_strongly_connected(G):
-                    G.add_edge(u, v, **data)
-
-    # Calculate the total street distance
-    for u, v, data in G.edges(data=True):
-        total_streets_length += data.get("distance")
 
     # print(nx.is_strongly_connected(G))
     visualized_graph = visualize_graph(
@@ -848,6 +848,5 @@ except:
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
     start_node = balance_graph(copied_graph, surplus, deficit)
-    # print(nx.is_strongly_connected(copied_graph)) # for debugging
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
     visualize_path(visualized_graph, G, eulerian_path)
