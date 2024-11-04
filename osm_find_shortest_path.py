@@ -114,7 +114,7 @@ def parse_intersections(intersection_geojson, all_lanes):
     intersections = set()
 
     for feature in intersection_geojson["features"]:
-        i_type = feature["properties"]["type"]        
+        i_type = feature["properties"]["type"]
         if i_type == "road":
             # If the intersection type is road, then we can assign the src and dst intersections to lanes
 
@@ -124,19 +124,19 @@ def parse_intersections(intersection_geojson, all_lanes):
                 lane["src_i"] = feature["properties"]["src_i"]
                 lane["dst_i"] = feature["properties"]["dst_i"]
 
-        elif i_type == "intersection":            
-            #int_kind = feature["properties"]["intersection_kind"]            
+        elif i_type == "intersection":
+            # int_kind = feature["properties"]["intersection_kind"]
             if feature["properties"]["intersection_kind"] != "MapEdge":
-                #if int_kind != "Intersection":
-                    #print(int_kind)
-                #if feature["properties"]["movements"]:
+                # if int_kind != "Intersection":
+                # print(int_kind)
+                # if feature["properties"]["movements"]:
                 intersection = Intersection(
                     feature["properties"]["id"],
                     feature["properties"]["movements"],
                     shape(feature["geometry"]),
-                    feature["properties"]["intersection_kind"]
+                    feature["properties"]["intersection_kind"],
                 )
-                intersections.add(intersection)                
+                intersections.add(intersection)
         else:
             # Let's not look at other types at the moment
             continue
@@ -159,28 +159,31 @@ def get_twonodes_average_coords(G, start_node, end_node):
     )
     return [avg_start, avg_end]
 
+
 def get_closest_edge_midpoint(polygon1, polygon2):
-    #closest_point1, closest_point2 = nearest_points(polygon1, polygon2)
-    
+    # closest_point1, closest_point2 = nearest_points(polygon1, polygon2)
+
     closest_point = None
-    min_distance = float('inf')
-    
+    min_distance = float("inf")
+
     # Step 1: Find the closest pair of vertices between polygon1 and polygon2 using geodesic distance
     for coord1 in polygon1.exterior.coords:
         for coord2 in polygon2.exterior.coords:
             # Calculate the geodesic distance between coord1 and coord2
-            distance = geodesic(coord1[::-1], coord2[::-1]).meters  # Reverse coord1/coord2 for (lat, lon)
-            
+            distance = geodesic(
+                coord1[::-1], coord2[::-1]
+            ).meters  # Reverse coord1/coord2 for (lat, lon)
+
             # Update the closest points if this pair is closer
             if distance < min_distance:
                 min_distance = distance
-                closest_point1 = Point(coord1)                
-        
+                closest_point1 = Point(coord1)
+
     return closest_point1
 
-    
+
 # Create the directed multigraph
-def create_graph(lanes, intersections):    
+def create_graph(lanes, intersections):
     G = nx.MultiDiGraph()
 
     # Added nodes, which are grouped by their intersection
@@ -225,22 +228,26 @@ def create_graph(lanes, intersections):
                 if (lane["dst_i"] == id and lane["direction"] == "Forward") or (
                     lane["src_i"] == id and lane["direction"] == "Backward"
                 ):
-                    is_entering_value = True                                
-                
-                lane_geometry = lane.get("geometry")                 
-                int_node_geometry = get_closest_edge_midpoint(lane_geometry, intersection.geometry)
-                
-                tuples.add((node_id, is_entering_value, int_node_geometry, id)) #intersection.geometry, id))
+                    is_entering_value = True
+
+                lane_geometry = lane.get("geometry")
+                int_node_geometry = get_closest_edge_midpoint(
+                    lane_geometry, intersection.geometry
+                )
+
+                tuples.add(
+                    (node_id, is_entering_value, int_node_geometry, id)
+                )  # intersection.geometry, id))
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
-                    #geometry=intersection.geometry,
-                    geometry = int_node_geometry,
+                    # geometry=intersection.geometry,
+                    geometry=int_node_geometry,
                     intersection_id=id,
                 )
 
         intersections_node_map[id] = tuples
-    
+
     # Create edges inside the intersection
     for _, nodes in intersections_node_map.items():
         entering_nodes = []
@@ -255,15 +262,15 @@ def create_graph(lanes, intersections):
         if len(entering_nodes) > 0 and len(leaving_nodes) > 0:
             for e_node in entering_nodes:
                 e_node_id, _, e_geometry, _ = e_node
-                for l_node in leaving_nodes:                    
-                    l_node_id, _, l_geometry, _ = l_node                    
-                    
+                for l_node in leaving_nodes:
+                    l_node_id, _, l_geometry, _ = l_node
+
                     # Dont add backward turns to intersection
                     if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
-                        continue                    
+                        continue
 
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
-                    # street name is None                    
+                    # street name is None
                     G.add_edge(
                         e_node_id,
                         l_node_id,
@@ -371,14 +378,12 @@ def visualize_graph(
     # Add edges to the map (assuming edges are also polygons)
     for u, v, data in G.edges(data=True):
         geometry = data.get("geometry")
-        distance = data.get("distance")        
+        distance = data.get("distance")
         street_name = data.get("street_name", None)
         if geometry:
             coordinates = None
             if isinstance(geometry, Polygon):
-                coordinates = list(
-                    geometry.exterior.coords
-                )
+                coordinates = list(geometry.exterior.coords)
             elif isinstance(geometry, LineString):
                 buffered_line = geometry.buffer(0.000001)
                 coordinates = list(buffered_line.exterior.coords)
@@ -406,7 +411,7 @@ def visualize_path(folium_map_object, G, path):
     for i, edge in enumerate(path):
 
         corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
-        #print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
+        # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
         distance = corresponding_edge.get("distance", 0.0)
         street_name = corresponding_edge.get("street_name", None)
 
@@ -422,7 +427,7 @@ def visualize_path(folium_map_object, G, path):
             tooltip=f"Order: {i}\nDistance: {distance}m\nStreet name: {street_name}",
             opacity=0,
         ).add_to(folium_map_object)
-        
+
         folium.PolyLine(
             locations=coords,
             color="orange",
@@ -438,8 +443,8 @@ def visualize_path(folium_map_object, G, path):
     print()
 
     # Add the Leaflet PolylineDecorator library (not using it at the moment)
-    # folium_map_object.get_root().html.add_child(folium.Element("<script src='https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js'></script>"))   
-    
+    # folium_map_object.get_root().html.add_child(folium.Element("<script src='https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js'></script>"))
+
     # Add custom JavaScript for animation control
     animation_script = Template(
         """
@@ -672,6 +677,7 @@ print("INIT")
 G = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
 print("GRAPH BUILDING FINISHED!")
 
+
 def get_boundaries(geojson_boundaries):
     lats = []
     lons = []
@@ -692,7 +698,7 @@ map_boundaries = get_boundaries(loaded_boundary_geojson)
 print("BOUNDARY PARSING FINISHED!")
 
 # Visualize the created graph for debugging
-#visualize_graph(G, map_boundaries)
+# visualize_graph(G, map_boundaries)
 
 
 ###
@@ -715,11 +721,12 @@ except:
     # 3) Repeat steps 1-2 until there are no such nodes left in the graph, which have no outgoing edges.
     # 4) Find the shortest path for visiting each edge at least once.
 
-
     if not nx.is_strongly_connected(G):
         components = list(nx.strongly_connected_components(G))
-        largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))                
-        #print(G)
+        largest_component = max(
+            components, key=lambda c: (len(c), G.subgraph(c).size())
+        )
+        # print(G)
         G = G.subgraph(largest_component).copy()
         print(G)
 
@@ -733,25 +740,24 @@ except:
                 in_counter += 1
             else:
                 nodes_to_remove.append(node)
-        #if G.in_degree(node) == 0:
-            #if G.out_degree(node) == 1 and out_counter == 0:
-                #out_counter += 1
-            #else:
-                #nodes_to_remove.append(node)
+        # if G.in_degree(node) == 0:
+        # if G.out_degree(node) == 1 and out_counter == 0:
+        # out_counter += 1
+        # else:
+        # nodes_to_remove.append(node)
     G.remove_nodes_from(nodes_to_remove)
-    
-    
+
     ###
     # Remove edges inside the intersections
     ###
     edges = list(G.edges(data=True))
     for u, v, data in edges:
-        if data.get('edge_type') == 'intersection':
+        if data.get("edge_type") == "intersection":
             if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
                 G.remove_edge(u, v)
                 if not nx.is_strongly_connected(G):
                     G.add_edge(u, v, **data)
-    
+
     # Calculate the total street distance
     for u, v, data in G.edges(data=True):
         total_streets_length += data.get("distance")
@@ -786,28 +792,30 @@ except:
         """Balance the graph by retracing edges and adjusting traversal counts."""
 
         surplus_copy, deficit_copy = surplus.copy(), deficit.copy()
-        
+
         # Handle retracing of edges between surplus and deficit nodes
         for s_node in surplus.keys():
             for d_node in deficit.keys():
                 if surplus[s_node] > 0 and deficit[d_node] > 0:
-                    # It will suffice for an eulerian path, 
+                    # It will suffice for an eulerian path,
                     #   if we have exactly one surplus node and one deficit node left
-                    #   and both of such nodes have an offset (from 0) of one. 
-                    if (len(surplus_copy) == 1 and len(deficit_copy) == 1) and\
-                        (surplus[s_node] == 1 and deficit[d_node] == 1):
-                            surplus = surplus_copy
-                            deficit = deficit_copy
-                            return s_node
-                    
+                    #   and both of such nodes have an offset (from 0) of one.
+                    if (len(surplus_copy) == 1 and len(deficit_copy) == 1) and (
+                        surplus[s_node] == 1 and deficit[d_node] == 1
+                    ):
+                        surplus = surplus_copy
+                        deficit = deficit_copy
+                        return s_node
+
                     # Use Dijkstra algorithm to find the shortest path from d_node to s_node
                     # Calculate the shortest path based on the distance of an edge.
                     shortest_path = nx.dijkstra_path(
-                        G, d_node, s_node, weight="distance")
+                        G, d_node, s_node, weight="distance"
+                    )
 
                     surplus[s_node] -= 1
                     deficit[d_node] -= 1
-                    
+
                     if surplus[s_node] == 0:
                         del surplus_copy[s_node]
                     if deficit[d_node] == 0:
@@ -822,9 +830,9 @@ except:
                         G.add_edge(u, v, **edge_attributes)
         surplus = surplus_copy
         deficit = deficit_copy
-        
-        return s_node        
-        
+
+        return s_node
+
     adj_table = defaultdict(set)
 
     for el in G.edges:
@@ -843,4 +851,4 @@ except:
     start_node = balance_graph(copied_graph, surplus, deficit)
     # print(nx.is_strongly_connected(copied_graph)) # for debugging
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
-    visualize_path(visualized_graph, G, eulerian_path)    
+    visualize_path(visualized_graph, G, eulerian_path)
