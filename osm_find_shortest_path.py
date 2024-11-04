@@ -6,7 +6,6 @@ from Intersection import Intersection
 from shapely.geometry import shape
 from shapely.geometry import LineString
 from shapely.geometry import Polygon
-from shapely.ops import nearest_points
 from collections import defaultdict
 
 # Graph visualization
