@@ -384,6 +384,7 @@ def visualize_graph(
             if isinstance(geometry, Polygon):
                 coordinates = list(geometry.exterior.coords)
             elif isinstance(geometry, LineString):
+                # The buffer here determines the thickness of the intersection edges
                 buffered_line = geometry.buffer(0.000005)
                 coordinates = list(buffered_line.exterior.coords)
             folium.Polygon(
