@@ -90,7 +90,8 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
 
             # Find out the lane's distance
             osm_way_id = lane["properties"]["osm_way_ids"][0]
-            street_name = parse_osm_file(osm_xml_file_path, osm_way_id)
+            #street_name = parse_osm_file(osm_xml_file_path, osm_way_id)
+            street_name = None
 
             lane_data = {
                 "road_id": lane["properties"]["road"],
@@ -104,6 +105,7 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
             lanes_by_road_id[lane_data["road_id"]].append(
                 lane_data
             )  # Group lanes by road_id
+    print("LANES PARSED!")
     return lanes_by_road_id
 
 
@@ -331,7 +333,9 @@ def create_graph(lanes, intersections):
 def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_path):
     # Load and parse the geojson files
     lanes_geojson = load_geojson(lane_geojson_file)
+    print("LANE GEOJSON LOADED!")
     intersections_geojson = load_geojson(intersection_geojson_file)
+    print("INTERSECTIONS GEOJSON LOADED!")
 
     lanes = parse_lanes(lanes_geojson, osm_xml_file_path)
     intersections = parse_intersections(intersections_geojson, lanes)
@@ -735,6 +739,7 @@ G.remove_nodes_from(nodes_to_remove)
 ###
 # Remove edges inside the intersections
 ###
+'''
 edges = list(G.edges(data=True))
 for u, v, data in edges:
     if data.get("edge_type") == "intersection":
@@ -742,6 +747,7 @@ for u, v, data in edges:
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
+'''
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
