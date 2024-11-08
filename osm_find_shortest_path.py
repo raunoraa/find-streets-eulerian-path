@@ -65,6 +65,7 @@ def parse_osm_file(file_path, way_id):
 
     tags = {tag.attrib["k"]: tag.attrib["v"] for tag in way.findall("tag")}
     street_name = tags.get("name", None)
+    
     return street_name
 
 
@@ -90,8 +91,8 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
 
             # Find out the lane's distance
             osm_way_id = lane["properties"]["osm_way_ids"][0]
-            #street_name = parse_osm_file(osm_xml_file_path, osm_way_id)
             street_name = None
+            #street_name = parse_osm_file(osm_xml_file_path, osm_way_id)        
 
             lane_data = {
                 "road_id": lane["properties"]["road"],
@@ -105,7 +106,6 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
             lanes_by_road_id[lane_data["road_id"]].append(
                 lane_data
             )  # Group lanes by road_id
-    print("LANES PARSED!")
     return lanes_by_road_id
 
 
@@ -121,9 +121,9 @@ def parse_intersections(intersection_geojson, all_lanes):
 
             lanes = all_lanes[feature["properties"]["id"]]
 
-            for lane in lanes:
+            for lane in lanes:                      
                 lane["src_i"] = feature["properties"]["src_i"]
-                lane["dst_i"] = feature["properties"]["dst_i"]
+                lane["dst_i"] = feature["properties"]["dst_i"]                     
 
         elif i_type == "intersection":
             # int_kind = feature["properties"]["intersection_kind"]
@@ -141,7 +141,6 @@ def parse_intersections(intersection_geojson, all_lanes):
         else:
             # Let's not look at other types at the moment
             continue
-    print("INTERSECTIONS PARSED!")
     return intersections
 
 
@@ -200,12 +199,12 @@ def create_graph(lanes, intersections):
         movements = intersection.movements
         unique_roads = set()  # a set of unique road ids in an intersection
         for movement in movements:
-            src_road, _ = movement.split(" -> ")
-
-            # There will always be 1-1 ratio of roads in intersections
-            # so we can take unique ones only from source or destination
+            src_road, dst_road = movement.split(" -> ")
+            
             src_id = int(src_road.split("#")[-1])
+            dst_id = int(dst_road.split("#")[-1])
             unique_roads.add(src_id)
+            unique_roads.add(dst_id)
 
         tuples = set()
         for ur in unique_roads:
@@ -216,11 +215,8 @@ def create_graph(lanes, intersections):
                 if (
                     lane["src_i"] not in intersection_ids
                     or lane["dst_i"] not in intersection_ids
-                ):
+                ):                    
                     continue
-
-                # Just for now, assign the same geometry to each intersection node
-                # have to change later (it's just visual distortion, wont affect the graph)
 
                 node_id = (id, lane["road_id"], lane["lane_id"])
 
@@ -229,16 +225,18 @@ def create_graph(lanes, intersections):
                 if (lane["dst_i"] == id and lane["direction"] == "Forward") or (
                     lane["src_i"] == id and lane["direction"] == "Backward"
                 ):
-                    is_entering_value = True
-
+                    is_entering_value = True                
+                
                 lane_geometry = lane.get("geometry")
+                
                 int_node_geometry = get_closest_edge_midpoint(
                     lane_geometry, intersection.geometry
                 )
 
                 tuples.add(
                     (node_id, is_entering_value, int_node_geometry, id)
-                )  # intersection.geometry, id))
+                )  # intersection.geometry, id))                
+                
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
@@ -288,9 +286,11 @@ def create_graph(lanes, intersections):
         id_tuple, node_data = node
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
-
+        
         # We can assume that there are only 2 nodes per each road
         if observable_tuple in observables.keys():
+            if road_id == 253:
+                print("RIIA TÄNAV!")
             popped_node = observables.pop(observable_tuple)
             node_one_id_tuple = popped_node[0]
 
@@ -300,9 +300,9 @@ def create_graph(lanes, intersections):
             for l in lanes[road_id]:
                 if l.get("lane_id") == lane_id:
                     lane_geometry = l.get("geometry")
-                    street_name = l.get("street_name")
+                    street_name = l.get("street_name")                    
                     break
-
+            
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
             distance = find_lane_distance(coords)
 
@@ -331,17 +331,26 @@ def create_graph(lanes, intersections):
 
 # Main function to construct the graph from geojson files
 def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_path):
+    
     # Load and parse the geojson files
+    
     lanes_geojson = load_geojson(lane_geojson_file)
     print("LANE GEOJSON LOADED!")
+    
     intersections_geojson = load_geojson(intersection_geojson_file)
     print("INTERSECTIONS GEOJSON LOADED!")
 
+
     lanes = parse_lanes(lanes_geojson, osm_xml_file_path)
+    print("LANES PARSED!")
+    
     intersections = parse_intersections(intersections_geojson, lanes)
+    print("INTERSECTIONS PARSED!")
+
 
     # Create the directed multigraph
     G = create_graph(lanes, intersections)
+    
     return G
 
 
@@ -438,12 +447,20 @@ def visualize_path(folium_map_object, G, path):
             weight=3,
             opacity=0,
         ).add_to(folium_map_object)
-
+    
+    distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(total_distance, 4)}m"
+    coefficient_string = f"Coefficient: {round(total_distance / total_streets_length, 4)}"
+    
+    # Write the results to a text file as well
+    results_file = open("results.txt", 'w', encoding='utf-8')
+    results_file.write(distances_string)
+    results_file.write('\n')
+    results_file.write(coefficient_string)
+    results_file.close()
+    
     print()
-    print(
-        f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(total_distance, 4)}m"
-    )
-    print("Coefficient:", round(total_distance / total_streets_length, 4))
+    print(distances_string)
+    print(coefficient_string)
     print()
 
     # Add the Leaflet PolylineDecorator library (not using it at the moment)
@@ -702,7 +719,7 @@ map_boundaries = get_boundaries(loaded_boundary_geojson)
 print("BOUNDARY PARSING FINISHED!")
 
 # Visualize the created graph for debugging
-# visualize_graph(G, map_boundaries)
+#visualize_graph(G, map_boundaries, visualize_nodes=False)
 
 
 ###
@@ -739,7 +756,7 @@ G.remove_nodes_from(nodes_to_remove)
 ###
 # Remove edges inside the intersections
 ###
-'''
+
 edges = list(G.edges(data=True))
 for u, v, data in edges:
     if data.get("edge_type") == "intersection":
@@ -747,7 +764,7 @@ for u, v, data in edges:
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
-'''
+
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
