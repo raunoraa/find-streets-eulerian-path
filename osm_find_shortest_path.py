@@ -747,7 +747,7 @@ G.remove_nodes_from(nodes_to_remove)
 edges = list(G.edges(data=True))
 for u, v, data in edges:
     if data.get("edge_type") == "intersection":
-        if not (G.out_degree(u) <= 2 or G.in_degree(v) <= 2):
+        if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
