@@ -117,7 +117,7 @@ def parse_intersections(intersection_geojson, all_lanes):
     for feature in intersection_geojson["features"]:
         i_type = feature["properties"]["type"]
         if i_type == "road":
-            # If the intersection type is road, then we can assign the src and dst intersections to lanes
+            # If the intersection type is road, then we can assign the src and dst intersections to lanes.
 
             lanes = all_lanes[feature["properties"]["id"]]
 
@@ -125,12 +125,8 @@ def parse_intersections(intersection_geojson, all_lanes):
                 lane["src_i"] = feature["properties"]["src_i"]
                 lane["dst_i"] = feature["properties"]["dst_i"]                     
 
-        elif i_type == "intersection":
-            # int_kind = feature["properties"]["intersection_kind"]
+        elif i_type == "intersection":            
             if feature["properties"]["intersection_kind"] != "MapEdge":
-                # if int_kind != "Intersection":
-                # print(int_kind)
-                # if feature["properties"]["movements"]:
                 intersection = Intersection(
                     feature["properties"]["id"],
                     feature["properties"]["movements"],
@@ -139,7 +135,7 @@ def parse_intersections(intersection_geojson, all_lanes):
                 )
                 intersections.add(intersection)
         else:
-            # Let's not look at other types at the moment
+            # Let's not look at the other types present in the file.
             continue
     return intersections
 
@@ -289,8 +285,6 @@ def create_graph(lanes, intersections):
         
         # We can assume that there are only 2 nodes per each road
         if observable_tuple in observables.keys():
-            if road_id == 253:
-                print("RIIA TÄNAV!")
             popped_node = observables.pop(observable_tuple)
             node_one_id_tuple = popped_node[0]
 
@@ -326,7 +320,7 @@ def create_graph(lanes, intersections):
         else:
             observables[observable_tuple] = node
 
-    return G
+    return G, intersection_ids
 
 
 # Main function to construct the graph from geojson files
@@ -349,9 +343,9 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_
 
 
     # Create the directed multigraph
-    G = create_graph(lanes, intersections)
+    G, int_ids = create_graph(lanes, intersections)
     
-    return G
+    return G, int_ids
 
 
 def visualize_graph(
@@ -695,7 +689,7 @@ osm_file_path = "map_files/osm_observable.xml"
 print()
 print("INIT")
 # Build the graph
-G = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
+G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
 print("GRAPH BUILDING FINISHED!")
 
 
@@ -726,7 +720,6 @@ print("BOUNDARY PARSING FINISHED!")
 # Find the shortest path to visit each graph edge at least once
 ###
 
-
 if not nx.is_strongly_connected(G):
     components = list(nx.strongly_connected_components(G))
     largest_component = max(
@@ -737,7 +730,6 @@ if not nx.is_strongly_connected(G):
     print(G)
 
 in_counter = 0
-out_counter = 0
 nodes_to_remove = []
 for node in G.nodes:
     # Remove the dead ends.
@@ -745,26 +737,22 @@ for node in G.nodes:
         if G.in_degree(node) == 1 and in_counter == 0:
             in_counter += 1
         else:
-            nodes_to_remove.append(node)
-    # if G.in_degree(node) == 0:
-    # if G.out_degree(node) == 1 and out_counter == 0:
-    # out_counter += 1
-    # else:
-    # nodes_to_remove.append(node)
+            nodes_to_remove.append(node)    
 G.remove_nodes_from(nodes_to_remove)
 
 ###
 # Remove edges inside the intersections
+# (Sometimes makes the coefficient better, sometimes worse)
 ###
-
 edges = list(G.edges(data=True))
 for u, v, data in edges:
     if data.get("edge_type") == "intersection":
-        if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
+        if not (G.out_degree(u) <= 2 or G.in_degree(v) <= 2):
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
 
+print("GRAPH MODIFYING FINISHED!")
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
@@ -774,7 +762,9 @@ for u, v, data in G.edges(data=True):
 # Try to get the eulerian path of the graph
 try:        
     eulerian_path = list(nx.eulerian_path(G))
-    print("IM HERE!")
+        
+    print("EULERIAN PATH FOUND WITHOUT BALANCING!")
+        
     visualized_graph = visualize_graph(
         G, map_boundaries, "debug_map", visualize_nodes=False
     )
@@ -784,6 +774,9 @@ except:
     ###
     # We need to balance the graph if no eulerian path was found.
     ###
+    
+    print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
+    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
 
     # print(nx.is_strongly_connected(G))
     visualized_graph = visualize_graph(
@@ -872,5 +865,11 @@ except:
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
     start_node = balance_graph(copied_graph, surplus, deficit)
+    
+    print("GRAPH BALANCING FINISHED!")
+    
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
+        
+    print("EULERIAN PATH FOUND!")
+    
     visualize_path(visualized_graph, G, eulerian_path)
