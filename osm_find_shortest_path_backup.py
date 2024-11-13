@@ -8,10 +8,6 @@ from shapely.geometry import LineString
 from shapely.geometry import Polygon
 from collections import defaultdict
 
-# Graph saving for qgis
-from datetime import datetime, timedelta
-import geopandas as gpd
-
 # Graph visualization
 import folium
 import random
@@ -352,6 +348,337 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_
     return G, int_ids
 
 
+def visualize_graph(
+    G, map_boundaries, file_name="city_graph_map", visualize_nodes=True
+):
+
+    # Create a Folium map centered on the middle of the boundaries
+    map_center = [
+        (map_boundaries[1] + map_boundaries[3]) / 2,
+        (map_boundaries[0] + map_boundaries[2]) / 2,
+    ]
+
+    # Initialize the Folium map
+    m = folium.Map(location=map_center, zoom_start=13)
+
+    # Add nodes to the map (assuming nodes are polygons)
+    for node, data in G.nodes(data=True):
+        geometry = data.get("geometry", None)
+        if geometry:
+            # Get the coordinates of the polygon
+            coordinates = list(
+                geometry.coords
+            )  # Taking the first polygon's coordinates
+            if visualize_nodes:
+                folium.Marker(
+                    location=(
+                        coordinates[0][1] + random.uniform(-0.00003, 0.00003),
+                        coordinates[0][0] + random.uniform(-0.00003, 0.00003),
+                    ),
+                    popup=f"Out degree: {G.out_degree(node)}; Int.id: {data['intersection_id']}",  # Optional popup text
+                    icon=folium.Icon(
+                        color="blue"
+                    ),  # Optional: Customize the marker color
+                ).add_to(m)
+
+    # Add edges to the map (assuming edges are also polygons)
+    for u, v, data in G.edges(data=True):
+        geometry = data.get("geometry")
+        distance = data.get("distance")
+        street_name = data.get("street_name", None)
+        if geometry:
+            coordinates = None
+            if isinstance(geometry, Polygon):
+                coordinates = list(geometry.exterior.coords)
+            elif isinstance(geometry, LineString):
+                # The buffer here determines the thickness of the intersection edges
+                buffered_line = geometry.buffer(0.000005)
+                coordinates = list(buffered_line.exterior.coords)
+            folium.Polygon(
+                locations=[(coord[1], coord[0]) for coord in coordinates],
+                color="black",
+                # weight=2,
+                # opacity=0.7,
+                fill=True,
+                fill_color="red",
+                fill_opacity=0.5,
+                popup=f"Edge from {u} to {v}\nDistance: {distance} meters\nStreet name: {street_name}",
+            ).add_to(m)
+
+    # Save the map as an html file
+    m.save(file_name + ".html")
+
+    return m
+
+
+def visualize_path(folium_map_object, G, path):
+
+    total_distance = 0.0
+
+    for i, edge in enumerate(path):
+
+        corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
+        # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
+        distance = corresponding_edge.get("distance", 0.0)
+        street_name = corresponding_edge.get("street_name", None)
+
+        total_distance += distance
+
+        start_node_id, end_node_id = edge
+        coords = get_twonodes_average_coords(G, start_node_id, end_node_id)
+
+        folium.PolyLine(
+            locations=coords,
+            color="blue",
+            weight=10,
+            tooltip=f"Order: {i}\nDistance: {distance}m\nStreet name: {street_name}",
+            opacity=0,
+        ).add_to(folium_map_object)
+
+        folium.PolyLine(
+            locations=coords,
+            color="orange",
+            weight=3,
+            opacity=0,
+        ).add_to(folium_map_object)
+    
+    distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(total_distance, 4)}m"
+    coefficient_string = f"Coefficient: {round(total_distance / total_streets_length, 4)}"
+    
+    # Write the results to a text file as well
+    results_file = open("results.txt", 'w', encoding='utf-8')
+    results_file.write(distances_string)
+    results_file.write('\n')
+    results_file.write(coefficient_string)
+    results_file.close()
+    
+    print()
+    print(distances_string)
+    print(coefficient_string)
+    print()
+
+    # Add the Leaflet PolylineDecorator library (not using it at the moment)
+    # folium_map_object.get_root().html.add_child(folium.Element("<script src='https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js'></script>"))
+
+    # Add custom JavaScript for animation control
+    animation_script = Template(
+        """
+    <script>    
+    document.addEventListener("DOMContentLoaded", function() {                       
+                                
+        let map = Object.values(window).find(v => v instanceof L.Map); // this is Folium's default map variable;        
+
+        let animation;
+        let currentStep = 0;
+        let prevStep = 0;
+        let playing = false;
+                                
+        let infoText = document.getElementById('info-text');
+                             
+        let polylines = [];
+        let orange_polylines = [];
+        //let polyline_layers = [];
+        map.eachLayer(function(layer) {
+            if(layer instanceof L.Polyline) {                
+                if(layer["_path"].getAttribute("stroke") === "blue") {
+                    //layer["_path"].setAttribute("marker-end", "url(#arrow)"); // Add the arrowhead to the end of the line
+                    polylines.push(layer["_path"]);
+                    //polyline_layers.push(layer); // Push the actual L.Polyline layer for decoration
+                }
+                else{
+                    if (layer["_path"].getAttribute("stroke") === "orange") {
+                        orange_polylines.push(layer["_path"]);
+                    }
+                }
+            }
+        });                                                                                                             
+
+        /*
+        for(const polyline of polyline_layers) {               
+            // Use PolylineDecorator to add arrows to the polyline
+            L.polylineDecorator(polyline, {
+                patterns: [
+                    {
+                        offset: '10%',  // Adjust this to position arrows along the polyline
+                        repeat: 0,  // No repetition
+                        symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: true, pathOptions: { color: 'blue', fillOpacity: 0, opacity: 0 } })
+                    }
+                        ]
+            }).addTo(map);
+            
+            console.log(polyline);
+        };
+        */    
+        
+        let prev_polyline = null;
+        let prev_orange = null;
+
+        let delay = 500;  // 500 ms delay between segments
+        const delaySlider = document.getElementById('delay-slider');
+        const delayValueDisplay = document.getElementById('delay-value');
+                                
+        const stepSlider = document.getElementById('step-slider');
+        stepSlider.max = polylines.length;
+        const stepValueDisplay = document.getElementById('step-value');
+
+        // Update the delay when slider is changed
+        delaySlider.oninput = function() {
+            delay = this.value;
+            delayValueDisplay.textContent = `${delay} ms`;  // Update the display
+        };               
+
+        stepSlider.oninput = function() {
+            prevStep = currentStep;
+            currentStep = this.value;
+            stepValueDisplay.textContent = `${currentStep}`;  // Update the display
+            animateStep();
+        }                  
+
+        function animatePath() {
+            if (!playing) return;  // Only animate when playing is true
+            if (currentStep >= polylines.length) {
+                infoText.textContent = "Finished!";
+                return;
+            }  // Stop when the end is reached                                                        
+
+            if (prev_polyline) {
+                prev_polyline.setAttribute("stroke", "blue");
+            }
+
+            let polyline = polylines[currentStep];            
+            if (polyline) {
+                let orange_polyline = orange_polylines[currentStep];
+                polyline.setAttribute("stroke-opacity", 1);  // Show the polyline
+                polyline.setAttribute("stroke", "white");
+                prev_polyline = polyline;
+                
+                orange_polyline.setAttribute("stroke-opacity", 1);
+                prev_orange = orange_polyline;
+            }
+            currentStep++;
+            
+            stepSlider.value = currentStep;
+            stepValueDisplay.textContent = `${currentStep}`;  // Update the display                                
+            
+            animation = setTimeout(animatePath, delay);
+        }
+                                
+        function animateStep(){
+            if(playing) return; // Only let it animate the step, when it is not auto-playing.            
+            console.log(prevStep + " " + currentStep)  ;
+                                
+            if (prev_polyline) {
+                
+                if (prevStep > currentStep) {
+                    for (let i = prevStep; i > prevStep - currentStep; i--) {
+                        polylines[i].setAttribute("stroke-opacity", 0);
+                    }
+                    //prev_polyline.style["stroke-opacity"] = 0;
+                } else 
+                {                                
+                    prev_polyline.setAttribute("stroke", "blue");
+                }
+            }
+
+            if (currentStep - prevStep >= 1){
+                prev_polyline.setAttribute("stroke") = "blue";
+                for (let i = prevStep; i < currentStep; i++) {                        
+                        polylines[i].setAttribute("stroke-opacity", 1);
+                        polylines[i].setAttribute("stroke", "black");
+                        prev_polyline = polylines[i];
+                }
+            }
+
+            else{
+                let polyline = polylines[currentStep];
+                if (polyline) {
+                    polyline.setAttribute("stroke-opacity", 1);  // Show the polyline
+                    polyline.setAttribute("stroke", "black");
+                    prev_polyline = polyline;
+                }    
+            }                
+        }
+
+        function playAnimation() {
+            if (currentStep < polylines.length) {
+                playing = true;
+                infoText.textContent = "Playing..."            
+                animatePath();
+            }
+        }
+
+        function pauseAnimation() {
+            playing = false;
+            infoText.textContent = "Paused"
+            clearTimeout(animation);
+        }
+
+        function resetAnimation() {
+            playing = false;
+            currentStep = 0;
+            clearTimeout(animation);            
+            resetAll();
+        }
+
+        function resetAll() {
+            infoText.textContent = "Ready!";
+            prev_polyline = null;
+            polylines = [];
+            map.eachLayer(function(layer) {
+                if(layer instanceof L.Polyline) {                
+                    if(layer["_path"].getAttribute("stroke") === "blue")
+                        polylines.push(layer["_path"]);
+                }
+            });
+            polylines.forEach(el => {
+                el.setAttribute("stroke-opacity", 0);
+            });
+        }
+
+        document.getElementById('play-button').onclick = function() { playAnimation(); };
+        document.getElementById('pause-button').onclick = function() { pauseAnimation(); };
+        document.getElementById('restart-button').onclick = function() { resetAnimation(); playAnimation(); };
+    });
+    </script>
+    """
+    ).render()
+
+    # Attach the JavaScript to the map HTML
+    folium_map_object.get_root().html.add_child(folium.Element(animation_script))
+
+    # Add play, pause, and restart buttons to the map
+    button_html = """
+        <div style="position: fixed; bottom: 60px; left: 50px; z-index: 9999;">
+
+            <p id="info-text">Ready!</p>
+
+            <button id="play-button" style="padding: 10px; margin-right: 10px;">Play</button>
+            <button id="pause-button" style="padding: 10px; margin-right: 10px;">Pause</button>
+            <button id="restart-button" style="padding: 10px;">Restart</button>
+
+            <!-- Add slider to control delay -->
+            <div style="margin-top: 20px;">
+                <label for="delay-slider">Animation Delay (ms):</label>
+                <input type="range" id="delay-slider" min="100" max="2000" value="500" step="100" style="margin-left: 10px;">
+                <span id="delay-value">500 ms</span>
+            </div>
+
+            <!-- Add slider to control steps -->
+            <div style="margin-top: 20px;">
+                <label for="step-slider">Steps:</label>
+                <input type="range" id="step-slider" min="0" max="1" value="0" step="1" style="margin-left: 10px;">
+                <span id="step-value">0</span>
+            </div>
+        </div>        
+    """
+    folium_map_object.get_root().html.add_child(folium.Element(button_html))
+
+    folium_map_object.save("animated_path.html")
+
+    # Return the Folium map
+    return folium_map_object
+
+
 folder_path = "map_files/observable_geojson_files/"
 
 lane_geojson_file = folder_path + "Lane_polygons.geojson"
@@ -385,92 +712,9 @@ loaded_boundary_geojson = load_geojson(boundary_geojson_file)
 map_boundaries = get_boundaries(loaded_boundary_geojson)
 print("BOUNDARY PARSING FINISHED!")
 
-def assign_edge_orders_with_multiple_traversals(path, G):
-    """
-    Assign timestamps to edges based on their traversal in the Eulerian path.
-    Each edge may be traversed multiple times, so the 'order' attribute will be a list of timestamps.
-    """
-    current_time = datetime(1980, 1, 1, 0, 0, 0)
+# Visualize the created graph for debugging
+#visualize_graph(G, map_boundaries, visualize_nodes=False)
 
-    for edge in path:
-        # Get the corresponding edge data from the graph (assuming edge is a tuple of nodes)
-        edge_data = G.get_edge_data(edge[0], edge[1]).get(0)
-
-        # If the edge doesn't have an 'order' attribute (list), initialize it
-        if 'order' not in edge_data:
-            edge_data['order'] = []
-        
-        # Append the current timestamp to the edge's order list
-        edge_data['order'].append(current_time)
-        
-        # Increment the datetime by one second for the next traversal
-        current_time += timedelta(seconds=1)
-
-def create_edge_features_for_qgis(path, G):
-    """
-    Create a list of features for edges, where each edge is duplicated for each timestamp in the 'order' list.
-    Each traversal of the same edge gets its own timestamp and geometry.
-    """
-    edge_data = []  # List to hold the features (edges)
-
-    # Step 1: Assign timestamps to edges based on the Eulerian path
-    assign_edge_orders_with_multiple_traversals(path, G)
-    
-    # Step 2: For each edge, create a feature for each traversal (each timestamp)
-    for u, v, edge_attrs in G.edges(data=True):
-        if 'order' in edge_attrs:
-            # For each timestamp in the 'order' list, duplicate the edge
-            for timestamp in edge_attrs['order']:
-                # Duplicate the edge with the same geometry and assign the timestamp to 'order'
-                edge_attrs_copy = edge_attrs.copy()
-                edge_attrs_copy['order'] = timestamp.isoformat()  # Store as string (ISO 8601)
-
-                # Create a dictionary for the feature, including geometry and the timestamp
-                edge_data.append({
-                    'id': edge_attrs.get('id'),
-                    'geometry': edge_attrs.get('geometry'),
-                    'order': edge_attrs_copy['order'],
-                    'distance': edge_attrs.get('distance'),
-                    'edge_type': edge_attrs.get('edge_type'),
-                })
-
-    # Step 3: Create a GeoDataFrame for the edges
-    edges_gdf = gpd.GeoDataFrame(edge_data, geometry='geometry', crs='EPSG:4326')
-
-    return edges_gdf
-
-def create_node_features_for_qgis(G):
-    """
-    Create a list of node features for the graph. Each node is represented by a point.
-    """
-    node_data = []
-    
-    for node, node_attrs in G.nodes(data=True):
-        node_data.append({
-            'id': node,
-            'geometry': node_attrs.get('geometry')
-        })
-    
-    # Create a GeoDataFrame for the nodes
-    nodes_gdf = gpd.GeoDataFrame(node_data, geometry='geometry', crs='EPSG:4326')
-
-    return nodes_gdf
-
-def save_graph_to_geopackage(path, G, output_file='output.gpkg'):
-    """
-    Create a GeoDataFrame from the graph (nodes and edges) and save it to a GeoPackage.
-    """
-    # Create the GeoDataFrame for edges with timestamps
-    edges_gdf = create_edge_features_for_qgis(path, G)
-    
-    # Create the GeoDataFrame for nodes
-    nodes_gdf = create_node_features_for_qgis(G)
-
-    # Step 4: Save both nodes and edges to a GeoPackage
-    edges_gdf.to_file(output_file, layer='edges', driver="GPKG")
-    nodes_gdf.to_file(output_file, layer='nodes', driver="GPKG")
-
-    print(f"Graph saved to {output_file}")
 
 ###
 # Find the shortest path to visit each graph edge at least once
@@ -520,9 +764,11 @@ try:
     eulerian_path = list(nx.eulerian_path(G))
         
     print("EULERIAN PATH FOUND WITHOUT BALANCING!")
-    
-    save_graph_to_geopackage(eulerian_path, G)
-    
+        
+    visualized_graph = visualize_graph(
+        G, map_boundaries, "debug_map", visualize_nodes=False
+    )
+    visualize_path(visualized_graph, G, eulerian_path)
 
 except:
     ###
@@ -530,7 +776,12 @@ except:
     ###
     
     print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
-    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")   
+    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
+
+    # print(nx.is_strongly_connected(G))
+    visualized_graph = visualize_graph(
+        G, map_boundaries, "debug_map", visualize_nodes=False
+    )
 
     def calculate_surplus_and_deficit(graph):
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
@@ -598,6 +849,16 @@ except:
 
         return s_node
 
+    adj_table = defaultdict(set)
+
+    for el in G.edges:
+        adj_table[el[0]].add(el[1])
+
+    graph_list = defaultdict(list)
+
+    for key, value in adj_table.items():
+        graph_list[key] = list(value)
+
     copied_graph = nx.MultiDiGraph(G)
 
     surplus = {}
@@ -611,4 +872,4 @@ except:
         
     print("EULERIAN PATH FOUND!")
     
-    save_graph_to_geopackage(eulerian_path, G)
+    visualize_path(visualized_graph, G, eulerian_path)
