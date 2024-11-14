@@ -61,42 +61,28 @@ def is_car_drivable(lane):
     return backward_access == "Yes" or forward_access == "Yes"
 
 
-def parse_osm_file(file_path, way_id):
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-
-    way = root.find(f"./way[@id='{way_id}']")
-
-    tags = {tag.attrib["k"]: tag.attrib["v"] for tag in way.findall("tag")}
-    street_name = tags.get("name", None)
-    
-    return street_name
-
-
 def find_lane_distance(node_coords):
 
-    total_length = 0.0
-    for i in range(len(node_coords) - 1):
-        start_node = node_coords[i]
-        next_node = node_coords[i + 1]
-        total_length += geodesic(start_node, next_node).meters
-
-    return total_length
+    if len(node_coords) > 2:
+        print("TOO LARGE NODE COORDS!", node_coords)
+        print(1/0)
+    if not node_coords or len(node_coords) < 1:
+        print("EMPTY NODE COORDS!")
+        print(1/0)
+        
+    start_node = node_coords[0]
+    next_node = node_coords[1]
+    return geodesic(start_node, next_node).meters
 
 
 # Load and filter car-drivable lanes
 # Returns a defaultdict, where keys are road_ids and values are the lanes (and their respective data)
-def parse_lanes(lane_geojson, osm_xml_file_path):
+def parse_lanes(lane_geojson):
     lanes_by_road_id = defaultdict(
         list
     )  # A dictionary where road_id is the key, and values are lists of lanes
     for lane in lane_geojson["features"]:
-        if is_car_drivable(lane):
-
-            # Find out the lane's distance
-            osm_way_id = lane["properties"]["osm_way_ids"][0]
-            street_name = None
-            #street_name = parse_osm_file(osm_xml_file_path, osm_way_id)        
+        if is_car_drivable(lane):  
 
             lane_data = {
                 "road_id": lane["properties"]["road"],
@@ -105,7 +91,6 @@ def parse_lanes(lane_geojson, osm_xml_file_path):
                 "src_i": None,  # value will be added in parse_intersections
                 "dst_i": None,  # value will be added in parse_intersections
                 "geometry": shape(lane["geometry"]),
-                "street_name": street_name,
             }
             lanes_by_road_id[lane_data["road_id"]].append(
                 lane_data
@@ -161,9 +146,6 @@ def get_twonodes_average_coords(G, start_node, end_node):
 
 
 def get_closest_edge_midpoint(polygon1, polygon2):
-    # closest_point1, closest_point2 = nearest_points(polygon1, polygon2)
-
-    closest_point = None
     min_distance = float("inf")
 
     # Step 1: Find the closest pair of vertices between polygon1 and polygon2 using geodesic distance
@@ -267,14 +249,17 @@ def create_graph(lanes, intersections):
                     # Dont add backward turns to intersection
                     if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
                         continue
-
+                    
+                    coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
+                    intersection_road_distance = find_lane_distance(coords)
+                    
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
                     # street name is None
                     G.add_edge(
                         e_node_id,
                         l_node_id,
                         geometry=LineString([e_geometry, l_geometry]),
-                        distance=4.0,
+                        distance=intersection_road_distance,#4.0,
                         street_name=None,
                         edge_type="intersection",
                     )
@@ -311,6 +296,7 @@ def create_graph(lanes, intersections):
                     geometry=lane_geometry,
                     distance=distance,
                     street_name=street_name,
+                    edge_type="road",
                 )
             else:
                 G.add_edge(
@@ -328,7 +314,7 @@ def create_graph(lanes, intersections):
 
 
 # Main function to construct the graph from geojson files
-def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_path):
+def build_city_graph(lane_geojson_file, intersection_geojson_file):
     
     # Load and parse the geojson files
     
@@ -339,7 +325,7 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_
     print("INTERSECTIONS GEOJSON LOADED!")
 
 
-    lanes = parse_lanes(lanes_geojson, osm_xml_file_path)
+    lanes = parse_lanes(lanes_geojson)
     print("LANES PARSED!")
     
     intersections = parse_intersections(intersections_geojson, lanes)
@@ -357,33 +343,11 @@ folder_path = "map_files/observable_geojson_files/"
 lane_geojson_file = folder_path + "Lane_polygons.geojson"
 intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
 
-osm_file_path = "map_files/osm_observable.xml"
-
 print()
 print("INIT")
 # Build the graph
-G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
+G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file)
 print("GRAPH BUILDING FINISHED!")
-
-
-def get_boundaries(geojson_boundaries):
-    lats = []
-    lons = []
-
-    coordinates = geojson_boundaries["geometry"]["coordinates"][0]
-    for coordinate in coordinates:
-        lats.append(coordinate[0])
-        lons.append(coordinate[1])
-
-    return (min(lats), min(lons), max(lats), max(lons))
-
-
-# Define map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
-# Take this data from the Boundary.geojson file
-boundary_geojson_file = folder_path + "Boundary.geojson"
-loaded_boundary_geojson = load_geojson(boundary_geojson_file)
-map_boundaries = get_boundaries(loaded_boundary_geojson)
-print("BOUNDARY PARSING FINISHED!")
 
 def assign_edge_orders_with_multiple_traversals(path, G):
     """
@@ -427,7 +391,7 @@ def create_edge_features_for_qgis(path, G):
 
                 # Create a dictionary for the feature, including geometry and the timestamp
                 edge_data.append({
-                    'id': edge_attrs.get('id'),
+                    'node_ids': str((u, v)),
                     'geometry': edge_attrs.get('geometry'),
                     'order': edge_attrs_copy['order'],
                     'distance': edge_attrs.get('distance'),
@@ -447,7 +411,7 @@ def create_node_features_for_qgis(G):
     
     for node, node_attrs in G.nodes(data=True):
         node_data.append({
-            'id': node,
+            'id': str(node),
             'geometry': node_attrs.get('geometry')
         })
     
@@ -455,6 +419,38 @@ def create_node_features_for_qgis(G):
     nodes_gdf = gpd.GeoDataFrame(node_data, geometry='geometry', crs='EPSG:4326')
 
     return nodes_gdf
+
+def save_results_as_txt(eulerian_path_distance, coefficient):  
+    distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(eulerian_path_distance, 4)}m"
+    coefficient_string = f"Coefficient: {round(coefficient, 4)}"
+    
+    # Write the results to a text file as well
+    results_file = open("results.txt", 'w', encoding='utf-8')
+    results_file.write(distances_string)
+    results_file.write('\n')
+    results_file.write(coefficient_string)
+    results_file.close()
+    
+    print()
+    print(distances_string)
+    print(coefficient_string)
+    print()
+
+def calculate_path_distance_and_coefficient(path, G):
+    path_distance = 0.0
+
+    for i, edge in enumerate(path):
+
+        corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
+        # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
+        distance = corresponding_edge.get("distance")
+
+        path_distance += distance
+        
+    coefficient = path_distance / total_streets_length
+    
+    return path_distance, coefficient
+    
 
 def save_graph_to_geopackage(path, G, output_file='output.gpkg'):
     """
@@ -469,6 +465,10 @@ def save_graph_to_geopackage(path, G, output_file='output.gpkg'):
     # Step 4: Save both nodes and edges to a GeoPackage
     edges_gdf.to_file(output_file, layer='edges', driver="GPKG")
     nodes_gdf.to_file(output_file, layer='nodes', driver="GPKG")
+    
+    # Save the eulerian path length and coefficient results to txt file.
+    path_d, coef = calculate_path_distance_and_coefficient(path, G)
+    save_results_as_txt(path_d, coef)
 
     print(f"Graph saved to {output_file}")
 
@@ -502,7 +502,7 @@ G.remove_nodes_from(nodes_to_remove)
 ###
 edges = list(G.edges(data=True))
 for u, v, data in edges:
-    if data.get("edge_type") == "intersection":
+    if data.get("edge_type") == "intersection":        
         if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
@@ -512,7 +512,7 @@ print("GRAPH MODIFYING FINISHED!")
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
-    total_streets_length += data.get("distance")
+    total_streets_length += data["distance"]
 
 
 # Try to get the eulerian path of the graph
@@ -564,7 +564,7 @@ except:
                 if surplus[s_node] > 0 and deficit[d_node] > 0:
                     # It will suffice for an eulerian path,
                     #   if we have exactly one surplus node and one deficit node left
-                    #   and both of such nodes have an offset (from 0) of one.
+                    #   and both of such nodes have an offset (from 0) of 1.
                     if (len(surplus_copy) == 1 and len(deficit_copy) == 1) and (
                         surplus[s_node] == 1 and deficit[d_node] == 1
                     ):
