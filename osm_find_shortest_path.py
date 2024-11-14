@@ -1,4 +1,3 @@
-from jinja2 import Template
 import networkx as nx
 import geojson
 from shapely import Point
@@ -11,13 +10,6 @@ from collections import defaultdict
 # Graph saving for qgis
 from datetime import datetime, timedelta
 import geopandas as gpd
-
-# Graph visualization
-import folium
-import random
-
-# OSM XML parsing
-import xml.etree.ElementTree as ET
 
 # For calculating the length of a road based on its coordinates
 from geopy.distance import geodesic
@@ -65,11 +57,11 @@ def find_lane_distance(node_coords):
 
     if len(node_coords) > 2:
         print("TOO LARGE NODE COORDS!", node_coords)
-        print(1/0)
+        print(1 / 0)
     if not node_coords or len(node_coords) < 1:
         print("EMPTY NODE COORDS!")
-        print(1/0)
-        
+        print(1 / 0)
+
     start_node = node_coords[0]
     next_node = node_coords[1]
     return geodesic(start_node, next_node).meters
@@ -82,7 +74,7 @@ def parse_lanes(lane_geojson):
         list
     )  # A dictionary where road_id is the key, and values are lists of lanes
     for lane in lane_geojson["features"]:
-        if is_car_drivable(lane):  
+        if is_car_drivable(lane):
 
             lane_data = {
                 "road_id": lane["properties"]["road"],
@@ -110,11 +102,11 @@ def parse_intersections(intersection_geojson, all_lanes):
 
             lanes = all_lanes[feature["properties"]["id"]]
 
-            for lane in lanes:                      
+            for lane in lanes:
                 lane["src_i"] = feature["properties"]["src_i"]
-                lane["dst_i"] = feature["properties"]["dst_i"]                     
+                lane["dst_i"] = feature["properties"]["dst_i"]
 
-        elif i_type == "intersection":            
+        elif i_type == "intersection":
             if feature["properties"]["intersection_kind"] != "MapEdge":
                 intersection = Intersection(
                     feature["properties"]["id"],
@@ -182,7 +174,7 @@ def create_graph(lanes, intersections):
         unique_roads = set()  # a set of unique road ids in an intersection
         for movement in movements:
             src_road, dst_road = movement.split(" -> ")
-            
+
             src_id = int(src_road.split("#")[-1])
             dst_id = int(dst_road.split("#")[-1])
             unique_roads.add(src_id)
@@ -197,7 +189,7 @@ def create_graph(lanes, intersections):
                 if (
                     lane["src_i"] not in intersection_ids
                     or lane["dst_i"] not in intersection_ids
-                ):                    
+                ):
                     continue
 
                 node_id = (id, lane["road_id"], lane["lane_id"])
@@ -207,18 +199,18 @@ def create_graph(lanes, intersections):
                 if (lane["dst_i"] == id and lane["direction"] == "Forward") or (
                     lane["src_i"] == id and lane["direction"] == "Backward"
                 ):
-                    is_entering_value = True                
-                
+                    is_entering_value = True
+
                 lane_geometry = lane.get("geometry")
-                
+
                 int_node_geometry = get_closest_edge_midpoint(
                     lane_geometry, intersection.geometry
                 )
 
                 tuples.add(
                     (node_id, is_entering_value, int_node_geometry, id)
-                )  # intersection.geometry, id))                
-                
+                )  # intersection.geometry, id))
+
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
@@ -249,17 +241,17 @@ def create_graph(lanes, intersections):
                     # Dont add backward turns to intersection
                     if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
                         continue
-                    
+
                     coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
                     intersection_road_distance = find_lane_distance(coords)
-                    
+
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
                     # street name is None
                     G.add_edge(
                         e_node_id,
                         l_node_id,
                         geometry=LineString([e_geometry, l_geometry]),
-                        distance=intersection_road_distance,#4.0,
+                        distance=intersection_road_distance,  # 4.0,
                         street_name=None,
                         edge_type="intersection",
                     )
@@ -271,7 +263,7 @@ def create_graph(lanes, intersections):
         id_tuple, node_data = node
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
-        
+
         # We can assume that there are only 2 nodes per each road
         if observable_tuple in observables.keys():
             popped_node = observables.pop(observable_tuple)
@@ -283,9 +275,9 @@ def create_graph(lanes, intersections):
             for l in lanes[road_id]:
                 if l.get("lane_id") == lane_id:
                     lane_geometry = l.get("geometry")
-                    street_name = l.get("street_name")                    
+                    street_name = l.get("street_name")
                     break
-            
+
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
             distance = find_lane_distance(coords)
 
@@ -315,26 +307,24 @@ def create_graph(lanes, intersections):
 
 # Main function to construct the graph from geojson files
 def build_city_graph(lane_geojson_file, intersection_geojson_file):
-    
+
     # Load and parse the geojson files
-    
+
     lanes_geojson = load_geojson(lane_geojson_file)
     print("LANE GEOJSON LOADED!")
-    
+
     intersections_geojson = load_geojson(intersection_geojson_file)
     print("INTERSECTIONS GEOJSON LOADED!")
 
-
     lanes = parse_lanes(lanes_geojson)
     print("LANES PARSED!")
-    
+
     intersections = parse_intersections(intersections_geojson, lanes)
     print("INTERSECTIONS PARSED!")
 
-
     # Create the directed multigraph
     G, int_ids = create_graph(lanes, intersections)
-    
+
     return G, int_ids
 
 
@@ -349,6 +339,7 @@ print("INIT")
 G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file)
 print("GRAPH BUILDING FINISHED!")
 
+
 def assign_edge_orders_with_multiple_traversals(path, G):
     """
     Assign timestamps to edges based on their traversal in the Eulerian path.
@@ -361,14 +352,15 @@ def assign_edge_orders_with_multiple_traversals(path, G):
         edge_data = G.get_edge_data(edge[0], edge[1]).get(0)
 
         # If the edge doesn't have an 'order' attribute (list), initialize it
-        if 'order' not in edge_data:
-            edge_data['order'] = []
-        
+        if "order" not in edge_data:
+            edge_data["order"] = []
+
         # Append the current timestamp to the edge's order list
-        edge_data['order'].append(current_time)
-        
+        edge_data["order"].append(current_time)
+
         # Increment the datetime by one second for the next traversal
         current_time += timedelta(seconds=1)
+
 
 def create_edge_features_for_qgis(path, G):
     """
@@ -379,62 +371,66 @@ def create_edge_features_for_qgis(path, G):
 
     # Step 1: Assign timestamps to edges based on the Eulerian path
     assign_edge_orders_with_multiple_traversals(path, G)
-    
+
     # Step 2: For each edge, create a feature for each traversal (each timestamp)
     for u, v, edge_attrs in G.edges(data=True):
-        if 'order' in edge_attrs:
+        if "order" in edge_attrs:
             # For each timestamp in the 'order' list, duplicate the edge
-            for timestamp in edge_attrs['order']:
+            for timestamp in edge_attrs["order"]:
                 # Duplicate the edge with the same geometry and assign the timestamp to 'order'
                 edge_attrs_copy = edge_attrs.copy()
-                edge_attrs_copy['order'] = timestamp.isoformat()  # Store as string (ISO 8601)
+                edge_attrs_copy["order"] = (
+                    timestamp.isoformat()
+                )  # Store as string (ISO 8601)
 
                 # Create a dictionary for the feature, including geometry and the timestamp
-                edge_data.append({
-                    'node_ids': str((u, v)),
-                    'geometry': edge_attrs.get('geometry'),
-                    'order': edge_attrs_copy['order'],
-                    'distance': edge_attrs.get('distance'),
-                    'edge_type': edge_attrs.get('edge_type'),
-                })
+                edge_data.append(
+                    {
+                        "node_ids": str((u, v)),
+                        "geometry": edge_attrs.get("geometry"),
+                        "order": edge_attrs_copy["order"],
+                        "distance": edge_attrs.get("distance"),
+                        "edge_type": edge_attrs.get("edge_type"),
+                    }
+                )
 
     # Step 3: Create a GeoDataFrame for the edges
-    edges_gdf = gpd.GeoDataFrame(edge_data, geometry='geometry', crs='EPSG:4326')
+    edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
 
     return edges_gdf
+
 
 def create_node_features_for_qgis(G):
     """
     Create a list of node features for the graph. Each node is represented by a point.
     """
     node_data = []
-    
+
     for node, node_attrs in G.nodes(data=True):
-        node_data.append({
-            'id': str(node),
-            'geometry': node_attrs.get('geometry')
-        })
-    
+        node_data.append({"id": str(node), "geometry": node_attrs.get("geometry")})
+
     # Create a GeoDataFrame for the nodes
-    nodes_gdf = gpd.GeoDataFrame(node_data, geometry='geometry', crs='EPSG:4326')
+    nodes_gdf = gpd.GeoDataFrame(node_data, geometry="geometry", crs="EPSG:4326")
 
     return nodes_gdf
 
-def save_results_as_txt(eulerian_path_distance, coefficient):  
+
+def save_results_as_txt(eulerian_path_distance, coefficient):
     distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(eulerian_path_distance, 4)}m"
     coefficient_string = f"Coefficient: {round(coefficient, 4)}"
-    
+
     # Write the results to a text file as well
-    results_file = open("results.txt", 'w', encoding='utf-8')
+    results_file = open("results.txt", "w", encoding="utf-8")
     results_file.write(distances_string)
-    results_file.write('\n')
+    results_file.write("\n")
     results_file.write(coefficient_string)
     results_file.close()
-    
+
     print()
     print(distances_string)
     print(coefficient_string)
     print()
+
 
 def calculate_path_distance_and_coefficient(path, G):
     path_distance = 0.0
@@ -446,31 +442,32 @@ def calculate_path_distance_and_coefficient(path, G):
         distance = corresponding_edge.get("distance")
 
         path_distance += distance
-        
-    coefficient = path_distance / total_streets_length
-    
-    return path_distance, coefficient
-    
 
-def save_graph_to_geopackage(path, G, output_file='output.gpkg'):
+    coefficient = path_distance / total_streets_length
+
+    return path_distance, coefficient
+
+
+def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
     """
     Create a GeoDataFrame from the graph (nodes and edges) and save it to a GeoPackage.
     """
     # Create the GeoDataFrame for edges with timestamps
     edges_gdf = create_edge_features_for_qgis(path, G)
-    
+
     # Create the GeoDataFrame for nodes
     nodes_gdf = create_node_features_for_qgis(G)
 
     # Step 4: Save both nodes and edges to a GeoPackage
-    edges_gdf.to_file(output_file, layer='edges', driver="GPKG")
-    nodes_gdf.to_file(output_file, layer='nodes', driver="GPKG")
-    
+    edges_gdf.to_file(output_file, layer="edges", driver="GPKG")
+    nodes_gdf.to_file(output_file, layer="nodes", driver="GPKG")
+
     # Save the eulerian path length and coefficient results to txt file.
     path_d, coef = calculate_path_distance_and_coefficient(path, G)
     save_results_as_txt(path_d, coef)
 
     print(f"Graph saved to {output_file}")
+
 
 ###
 # Find the shortest path to visit each graph edge at least once
@@ -478,9 +475,7 @@ def save_graph_to_geopackage(path, G, output_file='output.gpkg'):
 
 if not nx.is_strongly_connected(G):
     components = list(nx.strongly_connected_components(G))
-    largest_component = max(
-        components, key=lambda c: (len(c), G.subgraph(c).size())
-    )
+    largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))
     # print(G)
     G = G.subgraph(largest_component).copy()
     print(G)
@@ -493,7 +488,7 @@ for node in G.nodes:
         if G.in_degree(node) == 1 and in_counter == 0:
             in_counter += 1
         else:
-            nodes_to_remove.append(node)    
+            nodes_to_remove.append(node)
 G.remove_nodes_from(nodes_to_remove)
 
 ###
@@ -502,7 +497,7 @@ G.remove_nodes_from(nodes_to_remove)
 ###
 edges = list(G.edges(data=True))
 for u, v, data in edges:
-    if data.get("edge_type") == "intersection":        
+    if data.get("edge_type") == "intersection":
         if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
@@ -516,21 +511,21 @@ for u, v, data in G.edges(data=True):
 
 
 # Try to get the eulerian path of the graph
-try:        
+try:
     eulerian_path = list(nx.eulerian_path(G))
-        
+
     print("EULERIAN PATH FOUND WITHOUT BALANCING!")
-    
+
     save_graph_to_geopackage(eulerian_path, G)
-    
+
 
 except:
     ###
     # We need to balance the graph if no eulerian path was found.
     ###
-    
+
     print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
-    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")   
+    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
 
     def calculate_surplus_and_deficit(graph):
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
@@ -604,11 +599,11 @@ except:
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
     start_node = balance_graph(copied_graph, surplus, deficit)
-    
+
     print("GRAPH BALANCING FINISHED!")
-    
+
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
-        
+
     print("EULERIAN PATH FOUND!")
-    
+
     save_graph_to_geopackage(eulerian_path, G)
