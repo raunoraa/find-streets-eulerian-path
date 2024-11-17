@@ -1,10 +1,7 @@
 import networkx as nx
 import geojson
-from shapely import Point
 from Intersection import Intersection
-from shapely.geometry import shape
-from shapely.geometry import LineString
-from shapely.geometry import Polygon
+from shapely.geometry import shape, LineString, Point
 from collections import defaultdict
 
 # Graph saving for qgis
@@ -14,6 +11,8 @@ import geopandas as gpd
 # For calculating the length of a road based on its coordinates
 from geopy.distance import geodesic
 
+# for debugging
+import json
 
 ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
 total_streets_length = 0.0
@@ -54,14 +53,6 @@ def is_car_drivable(lane):
 
 
 def find_lane_distance(node_coords):
-
-    if len(node_coords) > 2:
-        print("TOO LARGE NODE COORDS!", node_coords)
-        print(1 / 0)
-    if not node_coords or len(node_coords) < 1:
-        print("EMPTY NODE COORDS!")
-        print(1 / 0)
-
     start_node = node_coords[0]
     next_node = node_coords[1]
     return geodesic(start_node, next_node).meters
@@ -156,7 +147,7 @@ def get_closest_edge_midpoint(polygon1, polygon2):
     return closest_point1
 
 
-# Create the directed multigraph
+# Create the directed graph
 def create_graph(lanes, intersections):
     G = nx.MultiDiGraph()
 
@@ -252,7 +243,6 @@ def create_graph(lanes, intersections):
                         l_node_id,
                         geometry=LineString([e_geometry, l_geometry]),
                         distance=intersection_road_distance,  # 4.0,
-                        street_name=None,
                         edge_type="intersection",
                     )
 
@@ -270,12 +260,10 @@ def create_graph(lanes, intersections):
             node_one_id_tuple = popped_node[0]
 
             lane_geometry = None
-            street_name = None
             # Get the lane geometry from the lanes defaultdict
             for l in lanes[road_id]:
                 if l.get("lane_id") == lane_id:
                     lane_geometry = l.get("geometry")
-                    street_name = l.get("street_name")
                     break
 
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
@@ -287,7 +275,6 @@ def create_graph(lanes, intersections):
                     node_one_id_tuple,
                     geometry=lane_geometry,
                     distance=distance,
-                    street_name=street_name,
                     edge_type="road",
                 )
             else:
@@ -296,7 +283,6 @@ def create_graph(lanes, intersections):
                     id_tuple,
                     geometry=lane_geometry,
                     distance=distance,
-                    street_name=street_name,
                     edge_type="road",
                 )
         else:
@@ -344,8 +330,10 @@ def assign_edge_orders_with_multiple_traversals(path, G):
     """
     Assign timestamps to edges based on their traversal in the Eulerian path.
     Each edge may be traversed multiple times, so the 'order' attribute will be a list of timestamps.
+    Order nr is just an index (starts from 1).
     """
     current_time = datetime(1980, 1, 1, 0, 0, 0)
+    order_nr = 0
 
     for edge in path:
         # Get the corresponding edge data from the graph (assuming edge is a tuple of nodes)
@@ -354,12 +342,15 @@ def assign_edge_orders_with_multiple_traversals(path, G):
         # If the edge doesn't have an 'order' attribute (list), initialize it
         if "order" not in edge_data:
             edge_data["order"] = []
+            edge_data["order_nr"] = []
 
         # Append the current timestamp to the edge's order list
         edge_data["order"].append(current_time)
+        edge_data["order_nr"].append(order_nr)
 
         # Increment the datetime by one second for the next traversal
         current_time += timedelta(seconds=1)
+        order_nr += 1
 
 
 def create_edge_features_for_qgis(path, G):
@@ -374,25 +365,28 @@ def create_edge_features_for_qgis(path, G):
 
     # Step 2: For each edge, create a feature for each traversal (each timestamp)
     for u, v, edge_attrs in G.edges(data=True):
-        if "order" in edge_attrs:
-            # For each timestamp in the 'order' list, duplicate the edge
-            for timestamp in edge_attrs["order"]:
-                # Duplicate the edge with the same geometry and assign the timestamp to 'order'
-                edge_attrs_copy = edge_attrs.copy()
-                edge_attrs_copy["order"] = (
-                    timestamp.isoformat()
-                )  # Store as string (ISO 8601)
+        # For each timestamp in the 'order' list, duplicate the edge
+        for i, timestamp in enumerate(edge_attrs["order"]):
+            # Duplicate the edge with the same geometry and assign the timestamp to 'order'
+            # edge_attrs_copy = edge_attrs.copy()
+            # edge_attrs_copy["order"] = timestamp
+            # edge_attrs_copy["order_nr"] = edge_attrs[i]
 
-                # Create a dictionary for the feature, including geometry and the timestamp
-                edge_data.append(
-                    {
-                        "node_ids": str((u, v)),
-                        "geometry": edge_attrs.get("geometry"),
-                        "order": edge_attrs_copy["order"],
-                        "distance": edge_attrs.get("distance"),
-                        "edge_type": edge_attrs.get("edge_type"),
-                    }
-                )
+            geometry = edge_attrs["geometry"]
+            if isinstance(geometry, LineString):
+                edge_attrs["geometry"] = geometry.buffer(0.000002)
+
+            # Create a dictionary for the feature, including geometry and the timestamp
+            edge_data.append(
+                {
+                    "node_ids": str((u, v)),
+                    "geometry": edge_attrs.get("geometry"),
+                    "order": timestamp,
+                    "order_nr": edge_attrs["order_nr"][i],
+                    "distance": edge_attrs.get("distance"),
+                    "edge_type": edge_attrs.get("edge_type"),
+                }
+            )
 
     # Step 3: Create a GeoDataFrame for the edges
     edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
@@ -473,23 +467,13 @@ def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
 # Find the shortest path to visit each graph edge at least once
 ###
 
+# Find the largest strongly connected component of the graph
 if not nx.is_strongly_connected(G):
     components = list(nx.strongly_connected_components(G))
     largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))
     # print(G)
     G = G.subgraph(largest_component).copy()
-    print(G)
-
-in_counter = 0
-nodes_to_remove = []
-for node in G.nodes:
-    # Remove the dead ends.
-    if G.out_degree(node) == 0:
-        if G.in_degree(node) == 1 and in_counter == 0:
-            in_counter += 1
-        else:
-            nodes_to_remove.append(node)
-G.remove_nodes_from(nodes_to_remove)
+    # print(G)
 
 ###
 # Remove edges inside the intersections
@@ -504,6 +488,7 @@ for u, v, data in edges:
                 G.add_edge(u, v, **data)
 
 print("GRAPH MODIFYING FINISHED!")
+print(G)
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
@@ -513,6 +498,8 @@ for u, v, data in G.edges(data=True):
 # Try to get the eulerian path of the graph
 try:
     eulerian_path = list(nx.eulerian_path(G))
+
+    # print(len(list(G.edges())), len(eulerian_path))
 
     print("EULERIAN PATH FOUND WITHOUT BALANCING!")
 
@@ -549,58 +536,78 @@ except:
         return surplus, deficit
 
     def balance_graph(G, surplus, deficit):
-        """Balance the graph by retracing edges and adjusting traversal counts."""
+        """Balance the graph by adding duplicate edges."""
 
-        surplus_copy, deficit_copy = surplus.copy(), deficit.copy()
+        surplus_node = None
 
-        # Handle retracing of edges between surplus and deficit nodes
-        for s_node in surplus.keys():
-            for d_node in deficit.keys():
-                if surplus[s_node] > 0 and deficit[d_node] > 0:
-                    # It will suffice for an eulerian path,
-                    #   if we have exactly one surplus node and one deficit node left
-                    #   and both of such nodes have an offset (from 0) of 1.
-                    if (len(surplus_copy) == 1 and len(deficit_copy) == 1) and (
-                        surplus[s_node] == 1 and deficit[d_node] == 1
-                    ):
-                        surplus = surplus_copy
-                        deficit = deficit_copy
-                        return s_node
+        while surplus and deficit:
+            # Get the first existing key in the dictionary
+            surplus_node = next(iter(surplus))
+            deficit_node = next(iter(deficit))
 
-                    # Use Dijkstra algorithm to find the shortest path from d_node to s_node
-                    # Calculate the shortest path based on the distance of an edge.
-                    shortest_path = nx.dijkstra_path(
-                        G, d_node, s_node, weight="distance"
-                    )
+            # It will suffice for an eulerian path,
+            #   if we have exactly one surplus node and one deficit node left,
+            #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of one.
+            if (len(surplus) == 1 and len(deficit) == 1) and (
+                surplus[surplus_node] == 1 and deficit[deficit_node] == 1
+            ):
+                break
 
-                    surplus[s_node] -= 1
-                    deficit[d_node] -= 1
+            # Find the shortest path from the deficit node to the surplus node.
+            # Duplicate the edges in this path.
+            shortest_path = nx.dijkstra_path(
+                G, source=deficit_node, target=surplus_node, weight="distance"
+            )
 
-                    if surplus[s_node] == 0:
-                        del surplus_copy[s_node]
-                    if deficit[d_node] == 0:
-                        del deficit_copy[d_node]
+            for i in range(len(shortest_path) - 1):
+                u, v = shortest_path[i], shortest_path[i + 1]
 
-                    for i in range(len(shortest_path) - 1):
-                        u, v = shortest_path[i], shortest_path[i + 1]
+                # Add a copy of an existing edge to the graph.
+                edge_attributes = G.get_edge_data(u, v).get(0)
+                G.add_edge(u, v, **edge_attributes)
 
-                        # Add a copy of an existing edge to the graph
-                        edge_key = list(G.get_edge_data(u, v).keys())[0]
-                        edge_attributes = G.get_edge_data(u, v, key=edge_key)
-                        G.add_edge(u, v, **edge_attributes)
-        surplus = surplus_copy
-        deficit = deficit_copy
+            # Reduce the surplus and deficit of the corresponding nodes.
+            surplus[surplus_node] -= 1
+            deficit[deficit_node] -= 1
 
-        return s_node
+            # Delete the dictionary entries if the node is no longer in surplus/deficit.
+            if surplus[surplus_node] == 0:
+                del surplus[surplus_node]
+            if deficit[deficit_node] == 0:
+                del deficit[deficit_node]
+
+        # Start traversing the path from the last observed surplus node.
+        return surplus_node
 
     copied_graph = nx.MultiDiGraph(G)
 
     surplus = {}
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
+
+    """
+    debug_surplus = {str(key): value for key, value in surplus.items()}
+    debug_deficit = {str(key): value for key, value in deficit.items()}
+    # Save the dictionaries to json files for debugging.
+    with open('surplus.json', 'w') as file:
+        json.dump(debug_surplus, file)
+    with open('deficit.json', 'w') as file:
+        json.dump(debug_deficit, file)
+    surplus_sum = 0
+    deficit_sum = 0
+    for k, v in surplus.items():
+        surplus_sum += v
+    for k, v in deficit.items():
+        deficit_sum += v
+    print("Surplus and deficit sums:", surplus_sum, deficit_sum)
+    """
+
     start_node = balance_graph(copied_graph, surplus, deficit)
 
     print("GRAPH BALANCING FINISHED!")
+
+    # Show the edge count for graph before and after the balancing.
+    # print(len(list(G.edges())), len(list(copied_graph.edges())))
 
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
 

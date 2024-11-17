@@ -1,2 +1,2 @@
-Street lanes distance: 557007.3287m ;; Eulerian path distance: 11750051.8214m
-Coefficient: 21.095
+Street lanes distance: 557812.6955m ;; Eulerian path distance: 11534349.5336m
+Coefficient: 20.6778
