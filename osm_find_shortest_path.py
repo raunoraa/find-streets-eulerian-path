@@ -150,6 +150,7 @@ def get_closest_edge_midpoint(polygon1, polygon2):
 # Create the directed graph
 def create_graph(lanes, intersections):
     G = nx.MultiDiGraph()
+    G_with_non_compulsory_edges = nx.MultiDiGraph()
 
     # Added nodes, which are grouped by their intersection
     # key=intersection id; value=set of nodes in an intersection
@@ -205,7 +206,12 @@ def create_graph(lanes, intersections):
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
-                    # geometry=intersection.geometry,
+                    geometry=int_node_geometry,
+                    intersection_id=id,
+                )
+                G_with_non_compulsory_edges.add_node(
+                    node_id,
+                    is_entering=is_entering_value,
                     geometry=int_node_geometry,
                     intersection_id=id,
                 )
@@ -228,13 +234,20 @@ def create_graph(lanes, intersections):
                 e_node_id, _, e_geometry, _ = e_node
                 for l_node in leaving_nodes:
                     l_node_id, _, l_geometry, _ = l_node
-
-                    # Dont add backward turns to intersection
-                    if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
-                        continue
-
+                    
                     coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
                     intersection_road_distance = find_lane_distance(coords)
+                    
+                    # Dont add backward turns to intersection (add to the graph, which contains non-compulsory edges)
+                    if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
+                        G_with_non_compulsory_edges.add_edge(
+                            e_node_id,
+                            l_node_id,
+                            geometry=LineString([e_geometry, l_geometry]),
+                            distance=intersection_road_distance,  # 4.0,
+                            edge_type="intersection",
+                        )
+                        continue                    
 
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
                     # street name is None
@@ -244,6 +257,13 @@ def create_graph(lanes, intersections):
                         geometry=LineString([e_geometry, l_geometry]),
                         distance=intersection_road_distance,  # 4.0,
                         edge_type="intersection",
+                    )
+                    G_with_non_compulsory_edges.add_edge(
+                            e_node_id,
+                            l_node_id,
+                            geometry=LineString([e_geometry, l_geometry]),
+                            distance=intersection_road_distance,  # 4.0,
+                            edge_type="intersection",
                     )
 
     # Create edges outside the intersections (basically add the lanes)
@@ -277,8 +297,22 @@ def create_graph(lanes, intersections):
                     distance=distance,
                     edge_type="road",
                 )
+                G_with_non_compulsory_edges.add_edge(
+                    id_tuple,
+                    node_one_id_tuple,
+                    geometry=lane_geometry,
+                    distance=distance,
+                    edge_type="road",
+                )
             else:
                 G.add_edge(
+                    node_one_id_tuple,
+                    id_tuple,
+                    geometry=lane_geometry,
+                    distance=distance,
+                    edge_type="road",
+                )
+                G_with_non_compulsory_edges.add_edge(
                     node_one_id_tuple,
                     id_tuple,
                     geometry=lane_geometry,
@@ -288,7 +322,7 @@ def create_graph(lanes, intersections):
         else:
             observables[observable_tuple] = node
 
-    return G, intersection_ids
+    return G, intersection_ids, G_with_non_compulsory_edges
 
 
 # Main function to construct the graph from geojson files
@@ -309,9 +343,9 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file):
     print("INTERSECTIONS PARSED!")
 
     # Create the directed multigraph
-    G, int_ids = create_graph(lanes, intersections)
+    G, int_ids, G_with_non_compulsory_edges = create_graph(lanes, intersections)
 
-    return G, int_ids
+    return G, int_ids, G_with_non_compulsory_edges
 
 
 folder_path = "map_files/observable_geojson_files/"
@@ -322,7 +356,7 @@ intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
 print()
 print("INIT")
 # Build the graph
-G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file)
+G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(lane_geojson_file, intersection_geojson_file)
 print("GRAPH BUILDING FINISHED!")
 
 
@@ -368,9 +402,6 @@ def create_edge_features_for_qgis(path, G):
         # For each timestamp in the 'order' list, duplicate the edge
         for i, timestamp in enumerate(edge_attrs["order"]):
             # Duplicate the edge with the same geometry and assign the timestamp to 'order'
-            # edge_attrs_copy = edge_attrs.copy()
-            # edge_attrs_copy["order"] = timestamp
-            # edge_attrs_copy["order_nr"] = edge_attrs[i]
 
             geometry = edge_attrs["geometry"]
             if isinstance(geometry, LineString):
@@ -474,6 +505,10 @@ if not nx.is_strongly_connected(G):
     # print(G)
     G = G.subgraph(largest_component).copy()
     # print(G)
+if not nx.is_strongly_connected(G_with_non_compulsory_edges):
+    components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
+    largest_component = max(components, key=lambda c: (len(c), G_with_non_compulsory_edges.subgraph(c).size()))
+    G_with_non_compulsory_edges = G_with_non_compulsory_edges.subgraph(largest_component).copy()
 
 ###
 # Remove edges inside the intersections
@@ -535,7 +570,7 @@ except:
 
         return surplus, deficit
 
-    def balance_graph(G, surplus, deficit):
+    def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
         """Balance the graph by adding duplicate edges."""
 
         surplus_node = None
@@ -556,15 +591,20 @@ except:
             # Find the shortest path from the deficit node to the surplus node.
             # Duplicate the edges in this path.
             shortest_path = nx.dijkstra_path(
-                G, source=deficit_node, target=surplus_node, weight="distance"
+                G_with_non_compulsory_edges, source=deficit_node, target=surplus_node, weight="distance"
             )
 
             for i in range(len(shortest_path) - 1):
                 u, v = shortest_path[i], shortest_path[i + 1]
-
-                # Add a copy of an existing edge to the graph.
-                edge_attributes = G.get_edge_data(u, v).get(0)
-                G.add_edge(u, v, **edge_attributes)
+                
+                if not initial_graph.has_edge(u, v):                    
+                    edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v).get(0)
+                    initial_graph.add_edge(u, v, **edge_attributes)
+                    G.add_edge(u, v, **edge_attributes)                    
+                else:
+                    # Add a copy of an existing edge to the graph.
+                    edge_attributes = G.get_edge_data(u, v).get(0)
+                    G.add_edge(u, v, **edge_attributes)
 
             # Reduce the surplus and deficit of the corresponding nodes.
             surplus[surplus_node] -= 1
@@ -602,7 +642,7 @@ except:
     print("Surplus and deficit sums:", surplus_sum, deficit_sum)
     """
 
-    start_node = balance_graph(copied_graph, surplus, deficit)
+    start_node = balance_graph(copied_graph, surplus, deficit, G_with_non_compulsory_edges, G)
 
     print("GRAPH BALANCING FINISHED!")
 
