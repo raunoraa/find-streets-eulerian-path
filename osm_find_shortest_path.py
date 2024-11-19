@@ -11,12 +11,31 @@ import geopandas as gpd
 # For calculating the length of a road based on its coordinates
 from geopy.distance import geodesic
 
-# for debugging
+# For parsing the osm.xml file
+import xml.etree.ElementTree as ET
 import json
 
 ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
 total_streets_length = 0.0
 
+
+def load_osm_to_dict(osm_file_path):
+    # {way_id: {tag1:value1, tag2:value2, ...}, ...}
+    osm_dict = {}
+    
+    # Use `iterparse` to load the XML incrementally
+    context = ET.iterparse(osm_file, events=("start", "end"))
+    for event, elem in context:
+        if event == "end" and elem.tag == "way":
+            osm_id = elem.get("id")
+            if osm_id:
+                # Collect tags into a dictionary for the current way
+                tags = {tag.get('k'): tag.get('v') for tag in elem.findall('tag')}
+                osm_dict[osm_id] = tags
+            # Clear the element from memory
+            elem.clear()
+    
+    return osm_dict
 
 # Load GeoJSON files
 def load_geojson(file_path):
@@ -60,24 +79,29 @@ def find_lane_distance(node_coords):
 
 # Load and filter car-drivable lanes
 # Returns a defaultdict, where keys are road_ids and values are the lanes (and their respective data)
-def parse_lanes(lane_geojson):
+def parse_lanes(lane_geojson, osm_dict):
     lanes_by_road_id = defaultdict(
         list
     )  # A dictionary where road_id is the key, and values are lists of lanes
+    
+    allowed_tags = set(["trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link", "residential", "unclassified"])
     for lane in lane_geojson["features"]:
         if is_car_drivable(lane):
-
-            lane_data = {
-                "road_id": lane["properties"]["road"],
-                "lane_id": lane["properties"]["index"],
-                "direction": lane["properties"]["direction"],
-                "src_i": None,  # value will be added in parse_intersections
-                "dst_i": None,  # value will be added in parse_intersections
-                "geometry": shape(lane["geometry"]),
-            }
-            lanes_by_road_id[lane_data["road_id"]].append(
-                lane_data
-            )  # Group lanes by road_id
+            
+            osm_way_id = lane["properties"]["osm_way_ids"][0]
+            highway_tag_value = osm_dict[str(osm_way_id)]["highway"]
+            if highway_tag_value in allowed_tags:
+                lane_data = {
+                    "road_id": lane["properties"]["road"],
+                    "lane_id": lane["properties"]["index"],
+                    "direction": lane["properties"]["direction"],
+                    "src_i": None,  # value will be added in parse_intersections
+                    "dst_i": None,  # value will be added in parse_intersections
+                    "geometry": shape(lane["geometry"]),
+                }
+                lanes_by_road_id[lane_data["road_id"]].append(
+                    lane_data
+                )  # Group lanes by road_id
     return lanes_by_road_id
 
 
@@ -326,9 +350,11 @@ def create_graph(lanes, intersections):
 
 
 # Main function to construct the graph from geojson files
-def build_city_graph(lane_geojson_file, intersection_geojson_file):
+def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file):
 
-    # Load and parse the geojson files
+    # Load and parse the geojson files and osm.xml file
+    osm_dict = load_osm_to_dict(osm_file)
+    print("OSM XML LOADED!")
 
     lanes_geojson = load_geojson(lane_geojson_file)
     print("LANE GEOJSON LOADED!")
@@ -336,7 +362,7 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file):
     intersections_geojson = load_geojson(intersection_geojson_file)
     print("INTERSECTIONS GEOJSON LOADED!")
 
-    lanes = parse_lanes(lanes_geojson)
+    lanes = parse_lanes(lanes_geojson, osm_dict)
     print("LANES PARSED!")
 
     intersections = parse_intersections(intersections_geojson, lanes)
@@ -353,10 +379,12 @@ folder_path = "map_files/observable_geojson_files/"
 lane_geojson_file = folder_path + "Lane_polygons.geojson"
 intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
 
+osm_file = "map_files/osm_observable.xml"
+
 print()
 print("INIT")
 # Build the graph
-G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(lane_geojson_file, intersection_geojson_file)
+G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file)
 print("GRAPH BUILDING FINISHED!")
 
 
