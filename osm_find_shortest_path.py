@@ -522,6 +522,17 @@ def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
     print(f"Graph saved to {output_file}")
 
 
+'''
+cleaned_multidigraph = nx.MultiDiGraph()
+edges_seen = set()
+for u, v, data in G.edges(data=True):
+    # Add edges only if the pair (u, v) is not seen
+    if (u, v) not in edges_seen:
+        edges_seen.add((u, v))
+        cleaned_multidigraph.add_edge(u, v, **data)
+G = cleaned_multidigraph
+'''
+
 ###
 # Find the shortest path to visit each graph edge at least once
 ###
@@ -537,6 +548,7 @@ if not nx.is_strongly_connected(G_with_non_compulsory_edges):
     components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
     largest_component = max(components, key=lambda c: (len(c), G_with_non_compulsory_edges.subgraph(c).size()))
     G_with_non_compulsory_edges = G_with_non_compulsory_edges.subgraph(largest_component).copy()
+
 
 ###
 # Remove edges inside the intersections
@@ -610,7 +622,7 @@ except:
 
             # It will suffice for an eulerian path,
             #   if we have exactly one surplus node and one deficit node left,
-            #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of one.
+            #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
             if (len(surplus) == 1 and len(deficit) == 1) and (
                 surplus[surplus_node] == 1 and deficit[deficit_node] == 1
             ):
