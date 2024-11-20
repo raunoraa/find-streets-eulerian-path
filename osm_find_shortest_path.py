@@ -533,6 +533,64 @@ for u, v, data in G.edges(data=True):
 G = cleaned_multidigraph
 '''
 
+def clean_eulerian_path(graph, eulerian_path):
+    """
+    Remove redundant duplicate loops from an Eulerian path.
+
+    Parameters:
+        graph: nx.MultiDiGraph
+            The graph in which the Eulerian path exists.
+        eulerian_path: list of tuples (u, v)
+            The Eulerian path as a list of edges.
+
+    Returns:
+        list of tuples: The cleaned Eulerian path without redundant loops.
+    """
+    edge_count = len(eulerian_path)
+    max_loop_length = edge_count // 2  # No loop can be longer than half the path
+    observed_loops = {}
+
+    cleaned_path = []
+    i = 0  # Pointer for the Eulerian path
+
+    while i < edge_count:
+        found_loop = False
+
+        # Try detecting a loop starting at the current index
+        for k in range(3, max_loop_length + 1):
+            end = i + k
+            if end > edge_count:
+                break
+
+            subsequence = eulerian_path[i:end]
+
+            # Check if it's a loop (start and end nodes match)
+            if subsequence[0][0] == subsequence[-1][1]:
+                # Normalize the loop representation for hashing (sorted edges)
+                loop_edges = tuple(sorted(subsequence))
+
+                # Check if this loop is a duplicate
+                if loop_edges in observed_loops:
+                    # Check if this duplicate can be removed
+                    if (
+                        i > 0 and end < edge_count and
+                        graph.has_edge(eulerian_path[i - 1][1], eulerian_path[end - 1][1])
+                    ):
+                        # Loop can be removed
+                        i = end  # Skip the loop
+                        found_loop = True
+                        break
+                else:
+                    # Record this loop as observed
+                    observed_loops[loop_edges] = (i, end)
+
+        if not found_loop:
+            # No removable loop found, add the current edge to the cleaned path
+            cleaned_path.append(eulerian_path[i])
+            i += 1
+
+    return cleaned_path
+
 ###
 # Find the shortest path to visit each graph edge at least once
 ###
@@ -690,6 +748,12 @@ except:
     # print(len(list(G.edges())), len(list(copied_graph.edges())))
 
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
+    
+    '''
+    print("STARTING CLEANING EULERIAN PATH!")
+    eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
+    print("CLEANING FINISHED!")
+    '''
 
     print("EULERIAN PATH FOUND!")
 
