@@ -1,27 +1,39 @@
-from jinja2 import Template
 import networkx as nx
 import geojson
-from shapely import Point
 from Intersection import Intersection
-from shapely.geometry import shape
-from shapely.geometry import LineString
-from shapely.geometry import Polygon
+from shapely.geometry import shape, LineString, Point
 from collections import defaultdict
 
-# Graph visualization
-import folium
-import random
-
-# OSM XML parsing
-import xml.etree.ElementTree as ET
+# Graph saving for qgis
+from datetime import datetime, timedelta
+import geopandas as gpd
 
 # For calculating the length of a road based on its coordinates
 from geopy.distance import geodesic
 
+# For parsing the osm.xml file
+import xml.etree.ElementTree as ET
 
 ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
 total_streets_length = 0.0
 
+def load_osm_to_dict(osm_file_path):
+    # {way_id: {tag1:value1, tag2:value2, ...}, ...}
+    osm_dict = {}
+    
+    # Use `iterparse` to load the XML incrementally
+    context = ET.iterparse(osm_file_path, events=("start", "end"))
+    for event, elem in context:
+        if event == "end" and elem.tag == "way":
+            osm_id = elem.get("id")
+            if osm_id:
+                # Collect tags into a dictionary for the current way
+                tags = {tag.get('k'): tag.get('v') for tag in elem.findall('tag')}
+                osm_dict[osm_id] = tags
+            # Clear the element from memory
+            elem.clear()
+    
+    return osm_dict
 
 # Load GeoJSON files
 def load_geojson(file_path):
@@ -57,55 +69,37 @@ def is_car_drivable(lane):
     return backward_access == "Yes" or forward_access == "Yes"
 
 
-def parse_osm_file(file_path, way_id):
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-
-    way = root.find(f"./way[@id='{way_id}']")
-
-    tags = {tag.attrib["k"]: tag.attrib["v"] for tag in way.findall("tag")}
-    street_name = tags.get("name", None)
-    
-    return street_name
-
-
 def find_lane_distance(node_coords):
-
-    total_length = 0.0
-    for i in range(len(node_coords) - 1):
-        start_node = node_coords[i]
-        next_node = node_coords[i + 1]
-        total_length += geodesic(start_node, next_node).meters
-
-    return total_length
+    start_node = node_coords[0]
+    next_node = node_coords[1]
+    return geodesic(start_node, next_node).meters
 
 
 # Load and filter car-drivable lanes
 # Returns a defaultdict, where keys are road_ids and values are the lanes (and their respective data)
-def parse_lanes(lane_geojson, osm_xml_file_path):
+def parse_lanes(lane_geojson, osm_dict):
     lanes_by_road_id = defaultdict(
         list
     )  # A dictionary where road_id is the key, and values are lists of lanes
+    
+    allowed_tags = set(["trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link", "residential", "unclassified"])
     for lane in lane_geojson["features"]:
         if is_car_drivable(lane):
-
-            # Find out the lane's distance
+            
             osm_way_id = lane["properties"]["osm_way_ids"][0]
-            street_name = None
-            #street_name = parse_osm_file(osm_xml_file_path, osm_way_id)        
-
-            lane_data = {
-                "road_id": lane["properties"]["road"],
-                "lane_id": lane["properties"]["index"],
-                "direction": lane["properties"]["direction"],
-                "src_i": None,  # value will be added in parse_intersections
-                "dst_i": None,  # value will be added in parse_intersections
-                "geometry": shape(lane["geometry"]),
-                "street_name": street_name,
-            }
-            lanes_by_road_id[lane_data["road_id"]].append(
-                lane_data
-            )  # Group lanes by road_id
+            highway_tag_value = osm_dict[str(osm_way_id)]["highway"]
+            if highway_tag_value in allowed_tags:
+                lane_data = {
+                    "road_id": lane["properties"]["road"],
+                    "lane_id": lane["properties"]["index"],
+                    "direction": lane["properties"]["direction"],
+                    "src_i": None,  # value will be added in parse_intersections
+                    "dst_i": None,  # value will be added in parse_intersections
+                    "geometry": shape(lane["geometry"]),
+                }
+                lanes_by_road_id[lane_data["road_id"]].append(
+                    lane_data
+                )  # Group lanes by road_id
     return lanes_by_road_id
 
 
@@ -121,11 +115,11 @@ def parse_intersections(intersection_geojson, all_lanes):
 
             lanes = all_lanes[feature["properties"]["id"]]
 
-            for lane in lanes:                      
+            for lane in lanes:
                 lane["src_i"] = feature["properties"]["src_i"]
-                lane["dst_i"] = feature["properties"]["dst_i"]                     
+                lane["dst_i"] = feature["properties"]["dst_i"]
 
-        elif i_type == "intersection":            
+        elif i_type == "intersection":
             if feature["properties"]["intersection_kind"] != "MapEdge":
                 intersection = Intersection(
                     feature["properties"]["id"],
@@ -157,9 +151,6 @@ def get_twonodes_average_coords(G, start_node, end_node):
 
 
 def get_closest_edge_midpoint(polygon1, polygon2):
-    # closest_point1, closest_point2 = nearest_points(polygon1, polygon2)
-
-    closest_point = None
     min_distance = float("inf")
 
     # Step 1: Find the closest pair of vertices between polygon1 and polygon2 using geodesic distance
@@ -178,9 +169,10 @@ def get_closest_edge_midpoint(polygon1, polygon2):
     return closest_point1
 
 
-# Create the directed multigraph
+# Create the directed graph
 def create_graph(lanes, intersections):
-    G = nx.MultiDiGraph()
+    G = nx.DiGraph()
+    G_with_non_compulsory_edges = nx.DiGraph()
 
     # Added nodes, which are grouped by their intersection
     # key=intersection id; value=set of nodes in an intersection
@@ -196,7 +188,7 @@ def create_graph(lanes, intersections):
         unique_roads = set()  # a set of unique road ids in an intersection
         for movement in movements:
             src_road, dst_road = movement.split(" -> ")
-            
+
             src_id = int(src_road.split("#")[-1])
             dst_id = int(dst_road.split("#")[-1])
             unique_roads.add(src_id)
@@ -211,7 +203,7 @@ def create_graph(lanes, intersections):
                 if (
                     lane["src_i"] not in intersection_ids
                     or lane["dst_i"] not in intersection_ids
-                ):                    
+                ):
                     continue
 
                 node_id = (id, lane["road_id"], lane["lane_id"])
@@ -221,22 +213,27 @@ def create_graph(lanes, intersections):
                 if (lane["dst_i"] == id and lane["direction"] == "Forward") or (
                     lane["src_i"] == id and lane["direction"] == "Backward"
                 ):
-                    is_entering_value = True                
-                
+                    is_entering_value = True
+
                 lane_geometry = lane.get("geometry")
-                
+
                 int_node_geometry = get_closest_edge_midpoint(
                     lane_geometry, intersection.geometry
                 )
 
                 tuples.add(
                     (node_id, is_entering_value, int_node_geometry, id)
-                )  # intersection.geometry, id))                
-                
+                )  # intersection.geometry, id))
+
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
-                    # geometry=intersection.geometry,
+                    geometry=int_node_geometry,
+                    intersection_id=id,
+                )
+                G_with_non_compulsory_edges.add_node(
+                    node_id,
+                    is_entering=is_entering_value,
                     geometry=int_node_geometry,
                     intersection_id=id,
                 )
@@ -259,10 +256,20 @@ def create_graph(lanes, intersections):
                 e_node_id, _, e_geometry, _ = e_node
                 for l_node in leaving_nodes:
                     l_node_id, _, l_geometry, _ = l_node
-
-                    # Dont add backward turns to intersection
+                    
+                    coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
+                    intersection_road_distance = find_lane_distance(coords)
+                    
+                    # Dont add backward turns to intersection (add to the graph, which contains non-compulsory edges)
                     if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
-                        continue
+                        G_with_non_compulsory_edges.add_edge(
+                            e_node_id,
+                            l_node_id,
+                            geometry=LineString([e_geometry, l_geometry]),
+                            distance=intersection_road_distance,  # 4.0,
+                            edge_type="intersection",
+                        )
+                        continue                    
 
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
                     # street name is None
@@ -270,9 +277,15 @@ def create_graph(lanes, intersections):
                         e_node_id,
                         l_node_id,
                         geometry=LineString([e_geometry, l_geometry]),
-                        distance=4.0,
-                        street_name=None,
+                        distance=intersection_road_distance,  # 4.0,
                         edge_type="intersection",
+                    )
+                    G_with_non_compulsory_edges.add_edge(
+                            e_node_id,
+                            l_node_id,
+                            geometry=LineString([e_geometry, l_geometry]),
+                            distance=intersection_road_distance,  # 4.0,
+                            edge_type="intersection",
                     )
 
     # Create edges outside the intersections (basically add the lanes)
@@ -282,21 +295,19 @@ def create_graph(lanes, intersections):
         id_tuple, node_data = node
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
-        
+
         # We can assume that there are only 2 nodes per each road
         if observable_tuple in observables.keys():
             popped_node = observables.pop(observable_tuple)
             node_one_id_tuple = popped_node[0]
 
             lane_geometry = None
-            street_name = None
             # Get the lane geometry from the lanes defaultdict
             for l in lanes[road_id]:
                 if l.get("lane_id") == lane_id:
                     lane_geometry = l.get("geometry")
-                    street_name = l.get("street_name")                    
                     break
-            
+
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
             distance = find_lane_distance(coords)
 
@@ -306,7 +317,14 @@ def create_graph(lanes, intersections):
                     node_one_id_tuple,
                     geometry=lane_geometry,
                     distance=distance,
-                    street_name=street_name,
+                    edge_type="road",
+                )
+                G_with_non_compulsory_edges.add_edge(
+                    id_tuple,
+                    node_one_id_tuple,
+                    geometry=lane_geometry,
+                    distance=distance,
+                    edge_type="road",
                 )
             else:
                 G.add_edge(
@@ -314,369 +332,44 @@ def create_graph(lanes, intersections):
                     id_tuple,
                     geometry=lane_geometry,
                     distance=distance,
-                    street_name=street_name,
+                    edge_type="road",
+                )
+                G_with_non_compulsory_edges.add_edge(
+                    node_one_id_tuple,
+                    id_tuple,
+                    geometry=lane_geometry,
+                    distance=distance,
                     edge_type="road",
                 )
         else:
             observables[observable_tuple] = node
 
-    return G, intersection_ids
+    return G, intersection_ids, G_with_non_compulsory_edges
 
 
 # Main function to construct the graph from geojson files
-def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_xml_file_path):
-    
-    # Load and parse the geojson files
-    
+def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file):
+
+    # Load and parse the geojson files and osm.xml file
+    osm_dict = load_osm_to_dict(osm_file)
+    print("OSM XML LOADED!")
+
     lanes_geojson = load_geojson(lane_geojson_file)
     print("LANE GEOJSON LOADED!")
-    
+
     intersections_geojson = load_geojson(intersection_geojson_file)
     print("INTERSECTIONS GEOJSON LOADED!")
 
-
-    lanes = parse_lanes(lanes_geojson, osm_xml_file_path)
+    lanes = parse_lanes(lanes_geojson, osm_dict)
     print("LANES PARSED!")
-    
+
     intersections = parse_intersections(intersections_geojson, lanes)
     print("INTERSECTIONS PARSED!")
 
-
     # Create the directed multigraph
-    G, int_ids = create_graph(lanes, intersections)
-    
-    return G, int_ids
+    G, int_ids, G_with_non_compulsory_edges = create_graph(lanes, intersections)
 
-
-def visualize_graph(
-    G, map_boundaries, file_name="city_graph_map", visualize_nodes=True
-):
-
-    # Create a Folium map centered on the middle of the boundaries
-    map_center = [
-        (map_boundaries[1] + map_boundaries[3]) / 2,
-        (map_boundaries[0] + map_boundaries[2]) / 2,
-    ]
-
-    # Initialize the Folium map
-    m = folium.Map(location=map_center, zoom_start=13)
-
-    # Add nodes to the map (assuming nodes are polygons)
-    for node, data in G.nodes(data=True):
-        geometry = data.get("geometry", None)
-        if geometry:
-            # Get the coordinates of the polygon
-            coordinates = list(
-                geometry.coords
-            )  # Taking the first polygon's coordinates
-            if visualize_nodes:
-                folium.Marker(
-                    location=(
-                        coordinates[0][1] + random.uniform(-0.00003, 0.00003),
-                        coordinates[0][0] + random.uniform(-0.00003, 0.00003),
-                    ),
-                    popup=f"Out degree: {G.out_degree(node)}; Int.id: {data['intersection_id']}",  # Optional popup text
-                    icon=folium.Icon(
-                        color="blue"
-                    ),  # Optional: Customize the marker color
-                ).add_to(m)
-
-    # Add edges to the map (assuming edges are also polygons)
-    for u, v, data in G.edges(data=True):
-        geometry = data.get("geometry")
-        distance = data.get("distance")
-        street_name = data.get("street_name", None)
-        if geometry:
-            coordinates = None
-            if isinstance(geometry, Polygon):
-                coordinates = list(geometry.exterior.coords)
-            elif isinstance(geometry, LineString):
-                # The buffer here determines the thickness of the intersection edges
-                buffered_line = geometry.buffer(0.000005)
-                coordinates = list(buffered_line.exterior.coords)
-            folium.Polygon(
-                locations=[(coord[1], coord[0]) for coord in coordinates],
-                color="black",
-                # weight=2,
-                # opacity=0.7,
-                fill=True,
-                fill_color="red",
-                fill_opacity=0.5,
-                popup=f"Edge from {u} to {v}\nDistance: {distance} meters\nStreet name: {street_name}",
-            ).add_to(m)
-
-    # Save the map as an html file
-    m.save(file_name + ".html")
-
-    return m
-
-
-def visualize_path(folium_map_object, G, path):
-
-    total_distance = 0.0
-
-    for i, edge in enumerate(path):
-
-        corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
-        # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
-        distance = corresponding_edge.get("distance", 0.0)
-        street_name = corresponding_edge.get("street_name", None)
-
-        total_distance += distance
-
-        start_node_id, end_node_id = edge
-        coords = get_twonodes_average_coords(G, start_node_id, end_node_id)
-
-        folium.PolyLine(
-            locations=coords,
-            color="blue",
-            weight=10,
-            tooltip=f"Order: {i}\nDistance: {distance}m\nStreet name: {street_name}",
-            opacity=0,
-        ).add_to(folium_map_object)
-
-        folium.PolyLine(
-            locations=coords,
-            color="orange",
-            weight=3,
-            opacity=0,
-        ).add_to(folium_map_object)
-    
-    distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(total_distance, 4)}m"
-    coefficient_string = f"Coefficient: {round(total_distance / total_streets_length, 4)}"
-    
-    # Write the results to a text file as well
-    results_file = open("results.txt", 'w', encoding='utf-8')
-    results_file.write(distances_string)
-    results_file.write('\n')
-    results_file.write(coefficient_string)
-    results_file.close()
-    
-    print()
-    print(distances_string)
-    print(coefficient_string)
-    print()
-
-    # Add the Leaflet PolylineDecorator library (not using it at the moment)
-    # folium_map_object.get_root().html.add_child(folium.Element("<script src='https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js'></script>"))
-
-    # Add custom JavaScript for animation control
-    animation_script = Template(
-        """
-    <script>    
-    document.addEventListener("DOMContentLoaded", function() {                       
-                                
-        let map = Object.values(window).find(v => v instanceof L.Map); // this is Folium's default map variable;        
-
-        let animation;
-        let currentStep = 0;
-        let prevStep = 0;
-        let playing = false;
-                                
-        let infoText = document.getElementById('info-text');
-                             
-        let polylines = [];
-        let orange_polylines = [];
-        //let polyline_layers = [];
-        map.eachLayer(function(layer) {
-            if(layer instanceof L.Polyline) {                
-                if(layer["_path"].getAttribute("stroke") === "blue") {
-                    //layer["_path"].setAttribute("marker-end", "url(#arrow)"); // Add the arrowhead to the end of the line
-                    polylines.push(layer["_path"]);
-                    //polyline_layers.push(layer); // Push the actual L.Polyline layer for decoration
-                }
-                else{
-                    if (layer["_path"].getAttribute("stroke") === "orange") {
-                        orange_polylines.push(layer["_path"]);
-                    }
-                }
-            }
-        });                                                                                                             
-
-        /*
-        for(const polyline of polyline_layers) {               
-            // Use PolylineDecorator to add arrows to the polyline
-            L.polylineDecorator(polyline, {
-                patterns: [
-                    {
-                        offset: '10%',  // Adjust this to position arrows along the polyline
-                        repeat: 0,  // No repetition
-                        symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: true, pathOptions: { color: 'blue', fillOpacity: 0, opacity: 0 } })
-                    }
-                        ]
-            }).addTo(map);
-            
-            console.log(polyline);
-        };
-        */    
-        
-        let prev_polyline = null;
-        let prev_orange = null;
-
-        let delay = 500;  // 500 ms delay between segments
-        const delaySlider = document.getElementById('delay-slider');
-        const delayValueDisplay = document.getElementById('delay-value');
-                                
-        const stepSlider = document.getElementById('step-slider');
-        stepSlider.max = polylines.length;
-        const stepValueDisplay = document.getElementById('step-value');
-
-        // Update the delay when slider is changed
-        delaySlider.oninput = function() {
-            delay = this.value;
-            delayValueDisplay.textContent = `${delay} ms`;  // Update the display
-        };               
-
-        stepSlider.oninput = function() {
-            prevStep = currentStep;
-            currentStep = this.value;
-            stepValueDisplay.textContent = `${currentStep}`;  // Update the display
-            animateStep();
-        }                  
-
-        function animatePath() {
-            if (!playing) return;  // Only animate when playing is true
-            if (currentStep >= polylines.length) {
-                infoText.textContent = "Finished!";
-                return;
-            }  // Stop when the end is reached                                                        
-
-            if (prev_polyline) {
-                prev_polyline.setAttribute("stroke", "blue");
-            }
-
-            let polyline = polylines[currentStep];            
-            if (polyline) {
-                let orange_polyline = orange_polylines[currentStep];
-                polyline.setAttribute("stroke-opacity", 1);  // Show the polyline
-                polyline.setAttribute("stroke", "white");
-                prev_polyline = polyline;
-                
-                orange_polyline.setAttribute("stroke-opacity", 1);
-                prev_orange = orange_polyline;
-            }
-            currentStep++;
-            
-            stepSlider.value = currentStep;
-            stepValueDisplay.textContent = `${currentStep}`;  // Update the display                                
-            
-            animation = setTimeout(animatePath, delay);
-        }
-                                
-        function animateStep(){
-            if(playing) return; // Only let it animate the step, when it is not auto-playing.            
-            console.log(prevStep + " " + currentStep)  ;
-                                
-            if (prev_polyline) {
-                
-                if (prevStep > currentStep) {
-                    for (let i = prevStep; i > prevStep - currentStep; i--) {
-                        polylines[i].setAttribute("stroke-opacity", 0);
-                    }
-                    //prev_polyline.style["stroke-opacity"] = 0;
-                } else 
-                {                                
-                    prev_polyline.setAttribute("stroke", "blue");
-                }
-            }
-
-            if (currentStep - prevStep >= 1){
-                prev_polyline.setAttribute("stroke") = "blue";
-                for (let i = prevStep; i < currentStep; i++) {                        
-                        polylines[i].setAttribute("stroke-opacity", 1);
-                        polylines[i].setAttribute("stroke", "black");
-                        prev_polyline = polylines[i];
-                }
-            }
-
-            else{
-                let polyline = polylines[currentStep];
-                if (polyline) {
-                    polyline.setAttribute("stroke-opacity", 1);  // Show the polyline
-                    polyline.setAttribute("stroke", "black");
-                    prev_polyline = polyline;
-                }    
-            }                
-        }
-
-        function playAnimation() {
-            if (currentStep < polylines.length) {
-                playing = true;
-                infoText.textContent = "Playing..."            
-                animatePath();
-            }
-        }
-
-        function pauseAnimation() {
-            playing = false;
-            infoText.textContent = "Paused"
-            clearTimeout(animation);
-        }
-
-        function resetAnimation() {
-            playing = false;
-            currentStep = 0;
-            clearTimeout(animation);            
-            resetAll();
-        }
-
-        function resetAll() {
-            infoText.textContent = "Ready!";
-            prev_polyline = null;
-            polylines = [];
-            map.eachLayer(function(layer) {
-                if(layer instanceof L.Polyline) {                
-                    if(layer["_path"].getAttribute("stroke") === "blue")
-                        polylines.push(layer["_path"]);
-                }
-            });
-            polylines.forEach(el => {
-                el.setAttribute("stroke-opacity", 0);
-            });
-        }
-
-        document.getElementById('play-button').onclick = function() { playAnimation(); };
-        document.getElementById('pause-button').onclick = function() { pauseAnimation(); };
-        document.getElementById('restart-button').onclick = function() { resetAnimation(); playAnimation(); };
-    });
-    </script>
-    """
-    ).render()
-
-    # Attach the JavaScript to the map HTML
-    folium_map_object.get_root().html.add_child(folium.Element(animation_script))
-
-    # Add play, pause, and restart buttons to the map
-    button_html = """
-        <div style="position: fixed; bottom: 60px; left: 50px; z-index: 9999;">
-
-            <p id="info-text">Ready!</p>
-
-            <button id="play-button" style="padding: 10px; margin-right: 10px;">Play</button>
-            <button id="pause-button" style="padding: 10px; margin-right: 10px;">Pause</button>
-            <button id="restart-button" style="padding: 10px;">Restart</button>
-
-            <!-- Add slider to control delay -->
-            <div style="margin-top: 20px;">
-                <label for="delay-slider">Animation Delay (ms):</label>
-                <input type="range" id="delay-slider" min="100" max="2000" value="500" step="100" style="margin-left: 10px;">
-                <span id="delay-value">500 ms</span>
-            </div>
-
-            <!-- Add slider to control steps -->
-            <div style="margin-top: 20px;">
-                <label for="step-slider">Steps:</label>
-                <input type="range" id="step-slider" min="0" max="1" value="0" step="1" style="margin-left: 10px;">
-                <span id="step-value">0</span>
-            </div>
-        </div>        
-    """
-    folium_map_object.get_root().html.add_child(folium.Element(button_html))
-
-    folium_map_object.save("animated_path.html")
-
-    # Return the Folium map
-    return folium_map_object
+    return G, int_ids, G_with_non_compulsory_edges
 
 
 folder_path = "map_files/observable_geojson_files/"
@@ -684,61 +377,238 @@ folder_path = "map_files/observable_geojson_files/"
 lane_geojson_file = folder_path + "Lane_polygons.geojson"
 intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
 
-osm_file_path = "map_files/osm_observable.xml"
+osm_file = "map_files/osm_observable.xml"
 
 print()
 print("INIT")
 # Build the graph
-G, intersection_ids = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file_path)
+G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file)
 print("GRAPH BUILDING FINISHED!")
 
 
-def get_boundaries(geojson_boundaries):
-    lats = []
-    lons = []
+def assign_edge_orders_with_multiple_traversals(path, G):
+    """
+    Assign timestamps to edges based on their traversal in the Eulerian path.
+    Each edge may be traversed multiple times, so the 'order' attribute will be a list of timestamps.
+    Order nr is just an index (starts from 1).
+    """
+    current_time = datetime(1980, 1, 1, 0, 0, 0)
+    order_nr = 0
 
-    coordinates = geojson_boundaries["geometry"]["coordinates"][0]
-    for coordinate in coordinates:
-        lats.append(coordinate[0])
-        lons.append(coordinate[1])
+    for edge in path:
+        # Get the corresponding edge data from the graph
+        edge_data = G.get_edge_data(edge[0], edge[1])
 
-    return (min(lats), min(lons), max(lats), max(lons))
+        # If the edge doesn't have an 'order' attribute (list), initialize it
+        if "order" not in edge_data:
+            edge_data["order"] = []
+            edge_data["order_nr"] = []
+
+        # Append the current timestamp to the edge's order list
+        edge_data["order"].append(current_time)
+        edge_data["order_nr"].append(order_nr)
+
+        # Increment the datetime by one second for the next traversal
+        current_time += timedelta(seconds=1)
+        order_nr += 1
 
 
-# Define map boundaries (min_latitude, min_longitude, max_latitude, max_longitude)
-# Take this data from the Boundary.geojson file
-boundary_geojson_file = folder_path + "Boundary.geojson"
-loaded_boundary_geojson = load_geojson(boundary_geojson_file)
-map_boundaries = get_boundaries(loaded_boundary_geojson)
-print("BOUNDARY PARSING FINISHED!")
+def create_edge_features_for_qgis(path, G):
+    """
+    Create a list of features for edges, where each edge is duplicated for each timestamp in the 'order' list.
+    Each traversal of the same edge gets its own timestamp and geometry.
+    """
+    edge_data = []  # List to hold the features (edges)
 
-# Visualize the created graph for debugging
-#visualize_graph(G, map_boundaries, visualize_nodes=False)
+    # Step 1: Assign timestamps to edges based on the Eulerian path
+    assign_edge_orders_with_multiple_traversals(path, G)
 
+    # Step 2: For each edge, create a feature for each traversal (each timestamp)
+    for u, v, edge_attrs in G.edges(data=True):
+        # For each timestamp in the 'order' list, duplicate the edge
+        for i, timestamp in enumerate(edge_attrs["order"]):
+            # Duplicate the edge with the same geometry and assign the timestamp to 'order'
+
+            geometry = edge_attrs["geometry"]
+            if isinstance(geometry, LineString):
+                edge_attrs["geometry"] = geometry.buffer(0.000002)
+
+            # Create a dictionary for the feature, including geometry and the timestamp
+            edge_data.append(
+                {
+                    "node_ids": str((u, v)),
+                    "geometry": edge_attrs.get("geometry"),
+                    "order": timestamp,
+                    "order_nr": edge_attrs["order_nr"][i],
+                    "distance": edge_attrs.get("distance"),
+                    "edge_type": edge_attrs.get("edge_type"),
+                }
+            )
+
+    # Step 3: Create a GeoDataFrame for the edges
+    edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
+
+    return edges_gdf
+
+
+def create_node_features_for_qgis(G):
+    """
+    Create a list of node features for the graph. Each node is represented by a point.
+    """
+    node_data = []
+
+    for node, node_attrs in G.nodes(data=True):
+        node_data.append({"id": str(node), "geometry": node_attrs.get("geometry")})
+
+    # Create a GeoDataFrame for the nodes
+    nodes_gdf = gpd.GeoDataFrame(node_data, geometry="geometry", crs="EPSG:4326")
+
+    return nodes_gdf
+
+
+def save_results_as_txt(eulerian_path_distance, coefficient):
+    distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(eulerian_path_distance, 4)}m"
+    coefficient_string = f"Coefficient: {round(coefficient, 4)}"
+
+    # Write the results to a text file as well
+    results_file = open("results.txt", "w", encoding="utf-8")
+    results_file.write(distances_string)
+    results_file.write("\n")
+    results_file.write(coefficient_string)
+    results_file.close()
+
+    print()
+    print(distances_string)
+    print(coefficient_string)
+    print()
+
+
+def calculate_path_distance_and_coefficient(path, G):
+    path_distance = 0.0
+
+    for i, edge in enumerate(path):
+
+        corresponding_edge = G.get_edge_data(edge[0], edge[1])
+        # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
+        distance = corresponding_edge.get("distance")
+
+        path_distance += distance
+
+    coefficient = path_distance / total_streets_length
+
+    return path_distance, coefficient
+
+
+def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
+    """
+    Create a GeoDataFrame from the graph (nodes and edges) and save it to a GeoPackage.
+    """
+    # Create the GeoDataFrame for edges with timestamps
+    edges_gdf = create_edge_features_for_qgis(path, G)
+
+    # Create the GeoDataFrame for nodes
+    nodes_gdf = create_node_features_for_qgis(G)
+
+    # Step 4: Save both nodes and edges to a GeoPackage
+    edges_gdf.to_file(output_file, layer="edges", driver="GPKG")
+    nodes_gdf.to_file(output_file, layer="nodes", driver="GPKG")
+
+    # Save the eulerian path length and coefficient results to txt file.
+    path_d, coef = calculate_path_distance_and_coefficient(path, G)
+    save_results_as_txt(path_d, coef)
+
+    print(f"Graph saved to {output_file}")
+
+def clean_eulerian_path(graph, eulerian_path):
+    """
+    Remove redundant duplicate loops from an Eulerian path.
+
+    Parameters:
+        graph: nx.MultiDiGraph
+            The graph in which the Eulerian path exists.
+        eulerian_path: list of tuples (u, v)
+            The Eulerian path as a list of edges.
+
+    Returns:
+        list of tuples: The cleaned Eulerian path without redundant loops (detects loops that are next to each other in the eulerian path list).
+    """
+    max_loop_length = 30
+    min_loop_length = 3
+    
+    observed_loop = []
+    compared_edges = []
+    reduntant_loop_identified = False
+
+    cleaned_path = eulerian_path.copy()
+    observable_loop_length = max_loop_length
+    node_indexes_to_remove = []
+
+    while observable_loop_length >= min_loop_length:
+        
+        if len(cleaned_path) <= observable_loop_length * 2:
+            break
+        
+        i = 0
+        while i < len(cleaned_path) - observable_loop_length:
+            
+            # check if we are looking at a loop currently
+            start = cleaned_path[i]
+            end = cleaned_path[i+observable_loop_length]
+            if start == end:
+                
+                for j in range(i, i+observable_loop_length):                    
+                    observed_loop.append(cleaned_path[j])
+                
+                temp_path_idx = i + observable_loop_length
+                j = 0
+                while j < len(cleaned_path) - observable_loop_length:
+                    compared_edges = [edge for edge in cleaned_path[j:j+observable_loop_length]]
+                    if observed_loop == compared_edges:
+                        #print(observed_loop, compared_edges)
+                        # we can safely remove the loop here
+                        node_indexes_to_remove += [idx for idx in range(j, j+observable_loop_length)]
+                        reduntant_loop_identified = True
+                    else:                        
+                        break
+                    j += observable_loop_length
+                observed_loop = []
+                compared_edges = []
+                if reduntant_loop_identified:
+                    reduntant_loop_identified = False
+                    i = j + observable_loop_length
+                else:
+                    i = temp_path_idx
+            else:
+                i += 1            
+                    
+        if node_indexes_to_remove:
+            #print("FOUND REDUNDACNY!", observable_loop_length, node_indexes_to_remove)
+            #print("FOUND REDUNDANCY!", observable_loop_length)
+            for k in range(len(node_indexes_to_remove) - 1, -1, -1):
+                idx = node_indexes_to_remove[k]
+                del cleaned_path[idx]
+            node_indexes_to_remove = []
+        
+        observable_loop_length -= 1
+
+    return cleaned_path
 
 ###
 # Find the shortest path to visit each graph edge at least once
 ###
 
+# Find the largest strongly connected component of the graph
 if not nx.is_strongly_connected(G):
     components = list(nx.strongly_connected_components(G))
-    largest_component = max(
-        components, key=lambda c: (len(c), G.subgraph(c).size())
-    )
+    largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))
     # print(G)
     G = G.subgraph(largest_component).copy()
-    print(G)
+    # print(G)
+if not nx.is_strongly_connected(G_with_non_compulsory_edges):
+    components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
+    largest_component = max(components, key=lambda c: (len(c), G_with_non_compulsory_edges.subgraph(c).size()))
+    G_with_non_compulsory_edges = G_with_non_compulsory_edges.subgraph(largest_component).copy()
 
-in_counter = 0
-nodes_to_remove = []
-for node in G.nodes:
-    # Remove the dead ends.
-    if G.out_degree(node) == 0:
-        if G.in_degree(node) == 1 and in_counter == 0:
-            in_counter += 1
-        else:
-            nodes_to_remove.append(node)    
-G.remove_nodes_from(nodes_to_remove)
 
 ###
 # Remove edges inside the intersections
@@ -751,37 +621,33 @@ for u, v, data in edges:
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
-
 print("GRAPH MODIFYING FINISHED!")
+print(G)
+
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
-    total_streets_length += data.get("distance")
+    total_streets_length += data["distance"]
 
 
 # Try to get the eulerian path of the graph
-try:        
+try:
     eulerian_path = list(nx.eulerian_path(G))
-        
+
+    # print(len(list(G.edges())), len(eulerian_path))
+
     print("EULERIAN PATH FOUND WITHOUT BALANCING!")
-        
-    visualized_graph = visualize_graph(
-        G, map_boundaries, "debug_map", visualize_nodes=False
-    )
-    visualize_path(visualized_graph, G, eulerian_path)
+
+    save_graph_to_geopackage(eulerian_path, G)
+
 
 except:
     ###
     # We need to balance the graph if no eulerian path was found.
     ###
-    
+
     print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
     print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
-
-    # print(nx.is_strongly_connected(G))
-    visualized_graph = visualize_graph(
-        G, map_boundaries, "debug_map", visualize_nodes=False
-    )
 
     def calculate_surplus_and_deficit(graph):
         """Calculate surplus and deficit nodes based on in-degree and out-degree."""
@@ -804,72 +670,75 @@ except:
 
         return surplus, deficit
 
-    def balance_graph(G, surplus, deficit):
-        """Balance the graph by retracing edges and adjusting traversal counts."""
+    def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
+        """Balance the graph by adding duplicate edges."""
 
-        surplus_copy, deficit_copy = surplus.copy(), deficit.copy()
+        surplus_node = None
 
-        # Handle retracing of edges between surplus and deficit nodes
-        for s_node in surplus.keys():
-            for d_node in deficit.keys():
-                if surplus[s_node] > 0 and deficit[d_node] > 0:
-                    # It will suffice for an eulerian path,
-                    #   if we have exactly one surplus node and one deficit node left
-                    #   and both of such nodes have an offset (from 0) of one.
-                    if (len(surplus_copy) == 1 and len(deficit_copy) == 1) and (
-                        surplus[s_node] == 1 and deficit[d_node] == 1
-                    ):
-                        surplus = surplus_copy
-                        deficit = deficit_copy
-                        return s_node
+        while surplus and deficit:
+            # Get the first existing key in the dictionary
+            surplus_node = next(iter(surplus))
+            deficit_node = next(iter(deficit))
 
-                    # Use Dijkstra algorithm to find the shortest path from d_node to s_node
-                    # Calculate the shortest path based on the distance of an edge.
-                    shortest_path = nx.dijkstra_path(
-                        G, d_node, s_node, weight="distance"
-                    )
+            # It will suffice for an eulerian path,
+            #   if we have exactly one surplus node and one deficit node left,
+            #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
+            if (len(surplus) == 1 and len(deficit) == 1) and (
+                surplus[surplus_node] == 1 and deficit[deficit_node] == 1
+            ):
+                break
 
-                    surplus[s_node] -= 1
-                    deficit[d_node] -= 1
+            # Find the shortest path from the deficit node to the surplus node.
+            # Duplicate the edges in this path.
+            shortest_path = nx.dijkstra_path(
+                G_with_non_compulsory_edges, source=deficit_node, target=surplus_node, weight="distance"
+            )
 
-                    if surplus[s_node] == 0:
-                        del surplus_copy[s_node]
-                    if deficit[d_node] == 0:
-                        del deficit_copy[d_node]
+            for i in range(len(shortest_path) - 1):
+                u, v = shortest_path[i], shortest_path[i + 1]
+                
+                if not initial_graph.has_edge(u, v):                    
+                    edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v)
+                    initial_graph.add_edge(u, v, **edge_attributes)
+                    G.add_edge(u, v, **edge_attributes)                    
+                else:
+                    # Add a copy of an existing edge to the graph.
+                    edge_attributes = G.get_edge_data(u, v).get(0)
+                    G.add_edge(u, v, **edge_attributes)
 
-                    for i in range(len(shortest_path) - 1):
-                        u, v = shortest_path[i], shortest_path[i + 1]
+            # Reduce the surplus and deficit of the corresponding nodes.
+            surplus[surplus_node] -= 1
+            deficit[deficit_node] -= 1
 
-                        # Add a copy of an existing edge to the graph
-                        edge_key = list(G.get_edge_data(u, v).keys())[0]
-                        edge_attributes = G.get_edge_data(u, v, key=edge_key)
-                        G.add_edge(u, v, **edge_attributes)
-        surplus = surplus_copy
-        deficit = deficit_copy
+            # Delete the dictionary entries if the node is no longer in surplus/deficit.
+            if surplus[surplus_node] == 0:
+                del surplus[surplus_node]
+            if deficit[deficit_node] == 0:
+                del deficit[deficit_node]
 
-        return s_node
-
-    adj_table = defaultdict(set)
-
-    for el in G.edges:
-        adj_table[el[0]].add(el[1])
-
-    graph_list = defaultdict(list)
-
-    for key, value in adj_table.items():
-        graph_list[key] = list(value)
+        # Start traversing the path from the last observed surplus node.
+        return surplus_node
 
     copied_graph = nx.MultiDiGraph(G)
 
     surplus = {}
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
-    start_node = balance_graph(copied_graph, surplus, deficit)
-    
+
+    start_node = balance_graph(copied_graph, surplus, deficit, G_with_non_compulsory_edges, G)
+
     print("GRAPH BALANCING FINISHED!")
-    
+
+    # Show the edge count for graph before and after the balancing.
+    # print(len(list(G.edges())), len(list(copied_graph.edges())))
+
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
-        
-    print("EULERIAN PATH FOUND!")
     
-    visualize_path(visualized_graph, G, eulerian_path)
+    #print("STARTING CLEANING EULERIAN PATH!")
+    #eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
+    #print("CLEANING FINISHED!")
+    
+
+    print("EULERIAN PATH FOUND!")
+
+    save_graph_to_geopackage(eulerian_path, G)

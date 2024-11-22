@@ -14,6 +14,8 @@ from geopy.distance import geodesic
 # For parsing the osm.xml file
 import xml.etree.ElementTree as ET
 
+import heapq
+
 ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
 total_streets_length = 0.0
 
@@ -611,8 +613,7 @@ if not nx.is_strongly_connected(G_with_non_compulsory_edges):
 
 
 ###
-# Remove edges inside the intersections
-# (Sometimes makes the coefficient better, sometimes worse)
+# Remove as much edges inside the intersections as possible
 ###
 edges = list(G.edges(data=True))
 for u, v, data in edges:
@@ -670,12 +671,46 @@ except:
 
         return surplus, deficit
 
+
+    def calculate_total_distance(G, path):
+        """Helper function to calculate the total distance of a given path."""
+        return sum(G[u][v]['distance'] for u, v in zip(path[:-1], path[1:]))
+
+    def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus_nodes):
+        """
+        Calculate the shortest path distances between all deficit and surplus nodes.
+        Returns a dictionary with distances for efficient lookup.
+        """
+        distances = {}
+        
+        for deficit_node in deficit_nodes:
+            for surplus_node in surplus_nodes:
+                shortest_path = nx.dijkstra_path(
+                    G_with_non_compulsory_edges, source=deficit_node, target=surplus_node, weight="distance"
+                )
+                distance = calculate_total_distance(G_with_non_compulsory_edges, shortest_path)
+                distances[(deficit_node, surplus_node)] = (distance, shortest_path)
+        
+        return distances
+    
     def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
         """Balance the graph by adding duplicate edges."""
 
         surplus_node = None
+        
+        # Get the list of deficit and surplus nodes
+        deficit_nodes = list(deficit.keys())
+        surplus_nodes = list(surplus.keys())
+        # Precompute all shortest paths between deficit and surplus nodes
+        distances = calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus_nodes)
+    
+        # Priority queue to select the best pairings based on the shortest distance
+        pq = []
+        for (deficit_node, surplus_node), (distance, shortest_path) in distances.items():
+            heapq.heappush(pq, (distance, deficit_node, surplus_node, shortest_path))
 
         while surplus and deficit:
+            
             # Get the first existing key in the dictionary
             surplus_node = next(iter(surplus))
             deficit_node = next(iter(deficit))
@@ -687,15 +722,16 @@ except:
                 surplus[surplus_node] == 1 and deficit[deficit_node] == 1
             ):
                 break
+            
+            # Get the best available pair (smallest distance)
+            distance, deficit_node, surplus_node, best_path = heapq.heappop(pq)
 
-            # Find the shortest path from the deficit node to the surplus node.
-            # Duplicate the edges in this path.
-            shortest_path = nx.dijkstra_path(
-                G_with_non_compulsory_edges, source=deficit_node, target=surplus_node, weight="distance"
-            )
+            # Check if the selected nodes are still in surplus and deficit
+            if deficit_node not in deficit or surplus_node not in surplus:
+                continue      
 
-            for i in range(len(shortest_path) - 1):
-                u, v = shortest_path[i], shortest_path[i + 1]
+            for i in range(len(best_path) - 1):
+                u, v = best_path[i], best_path[i + 1]
                 
                 if not initial_graph.has_edge(u, v):                    
                     edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v)
@@ -734,9 +770,9 @@ except:
 
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
     
-    print("STARTING CLEANING EULERIAN PATH!")
-    eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
-    print("CLEANING FINISHED!")
+    #print("STARTING CLEANING EULERIAN PATH!")
+    #eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
+    #print("CLEANING FINISHED!")
     
 
     print("EULERIAN PATH FOUND!")
