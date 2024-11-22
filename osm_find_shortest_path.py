@@ -13,18 +13,16 @@ from geopy.distance import geodesic
 
 # For parsing the osm.xml file
 import xml.etree.ElementTree as ET
-import json
 
 ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
 total_streets_length = 0.0
-
 
 def load_osm_to_dict(osm_file_path):
     # {way_id: {tag1:value1, tag2:value2, ...}, ...}
     osm_dict = {}
     
     # Use `iterparse` to load the XML incrementally
-    context = ET.iterparse(osm_file, events=("start", "end"))
+    context = ET.iterparse(osm_file_path, events=("start", "end"))
     for event, elem in context:
         if event == "end" and elem.tag == "way":
             osm_id = elem.get("id")
@@ -173,8 +171,8 @@ def get_closest_edge_midpoint(polygon1, polygon2):
 
 # Create the directed graph
 def create_graph(lanes, intersections):
-    G = nx.MultiDiGraph()
-    G_with_non_compulsory_edges = nx.MultiDiGraph()
+    G = nx.DiGraph()
+    G_with_non_compulsory_edges = nx.DiGraph()
 
     # Added nodes, which are grouped by their intersection
     # key=intersection id; value=set of nodes in an intersection
@@ -398,8 +396,8 @@ def assign_edge_orders_with_multiple_traversals(path, G):
     order_nr = 0
 
     for edge in path:
-        # Get the corresponding edge data from the graph (assuming edge is a tuple of nodes)
-        edge_data = G.get_edge_data(edge[0], edge[1]).get(0)
+        # Get the corresponding edge data from the graph
+        edge_data = G.get_edge_data(edge[0], edge[1])
 
         # If the edge doesn't have an 'order' attribute (list), initialize it
         if "order" not in edge_data:
@@ -490,7 +488,7 @@ def calculate_path_distance_and_coefficient(path, G):
 
     for i, edge in enumerate(path):
 
-        corresponding_edge = G.get_edge_data(edge[0], edge[1]).get(0)
+        corresponding_edge = G.get_edge_data(edge[0], edge[1])
         # print(str(edge[0])+str(edge[1])+":", G.has_edge(edge[0], edge[1]), ";;", "Corresponding edge:", corresponding_edge)
         distance = corresponding_edge.get("distance")
 
@@ -521,18 +519,6 @@ def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
 
     print(f"Graph saved to {output_file}")
 
-
-'''
-cleaned_multidigraph = nx.MultiDiGraph()
-edges_seen = set()
-for u, v, data in G.edges(data=True):
-    # Add edges only if the pair (u, v) is not seen
-    if (u, v) not in edges_seen:
-        edges_seen.add((u, v))
-        cleaned_multidigraph.add_edge(u, v, **data)
-G = cleaned_multidigraph
-'''
-
 def clean_eulerian_path(graph, eulerian_path):
     """
     Remove redundant duplicate loops from an Eulerian path.
@@ -544,50 +530,66 @@ def clean_eulerian_path(graph, eulerian_path):
             The Eulerian path as a list of edges.
 
     Returns:
-        list of tuples: The cleaned Eulerian path without redundant loops.
+        list of tuples: The cleaned Eulerian path without redundant loops (detects loops that are next to each other in the eulerian path list).
     """
-    edge_count = len(eulerian_path)
-    max_loop_length = edge_count // 2  # No loop can be longer than half the path
-    observed_loops = {}
+    max_loop_length = 30
+    min_loop_length = 3
+    
+    observed_loop = []
+    compared_edges = []
+    reduntant_loop_identified = False
 
-    cleaned_path = []
-    i = 0  # Pointer for the Eulerian path
+    cleaned_path = eulerian_path.copy()
+    observable_loop_length = max_loop_length
+    node_indexes_to_remove = []
 
-    while i < edge_count:
-        found_loop = False
-
-        # Try detecting a loop starting at the current index
-        for k in range(3, max_loop_length + 1):
-            end = i + k
-            if end > edge_count:
-                break
-
-            subsequence = eulerian_path[i:end]
-
-            # Check if it's a loop (start and end nodes match)
-            if subsequence[0][0] == subsequence[-1][1]:
-                # Normalize the loop representation for hashing (sorted edges)
-                loop_edges = tuple(sorted(subsequence))
-
-                # Check if this loop is a duplicate
-                if loop_edges in observed_loops:
-                    # Check if this duplicate can be removed
-                    if (
-                        i > 0 and end < edge_count and
-                        graph.has_edge(eulerian_path[i - 1][1], eulerian_path[end - 1][1])
-                    ):
-                        # Loop can be removed
-                        i = end  # Skip the loop
-                        found_loop = True
+    while observable_loop_length >= min_loop_length:
+        
+        if len(cleaned_path) <= observable_loop_length * 2:
+            break
+        
+        i = 0
+        while i < len(cleaned_path) - observable_loop_length:
+            
+            # check if we are looking at a loop currently
+            start = cleaned_path[i]
+            end = cleaned_path[i+observable_loop_length]
+            if start == end:
+                
+                for j in range(i, i+observable_loop_length):                    
+                    observed_loop.append(cleaned_path[j])
+                
+                temp_path_idx = i + observable_loop_length
+                j = 0
+                while j < len(cleaned_path) - observable_loop_length:
+                    compared_edges = [edge for edge in cleaned_path[j:j+observable_loop_length]]
+                    if observed_loop == compared_edges:
+                        #print(observed_loop, compared_edges)
+                        # we can safely remove the loop here
+                        node_indexes_to_remove += [idx for idx in range(j, j+observable_loop_length)]
+                        reduntant_loop_identified = True
+                    else:                        
                         break
+                    j += observable_loop_length
+                observed_loop = []
+                compared_edges = []
+                if reduntant_loop_identified:
+                    reduntant_loop_identified = False
+                    i = j + observable_loop_length
                 else:
-                    # Record this loop as observed
-                    observed_loops[loop_edges] = (i, end)
-
-        if not found_loop:
-            # No removable loop found, add the current edge to the cleaned path
-            cleaned_path.append(eulerian_path[i])
-            i += 1
+                    i = temp_path_idx
+            else:
+                i += 1            
+                    
+        if node_indexes_to_remove:
+            #print("FOUND REDUNDACNY!", observable_loop_length, node_indexes_to_remove)
+            #print("FOUND REDUNDANCY!", observable_loop_length)
+            for k in range(len(node_indexes_to_remove) - 1, -1, -1):
+                idx = node_indexes_to_remove[k]
+                del cleaned_path[idx]
+            node_indexes_to_remove = []
+        
+        observable_loop_length -= 1
 
     return cleaned_path
 
@@ -619,9 +621,9 @@ for u, v, data in edges:
             G.remove_edge(u, v)
             if not nx.is_strongly_connected(G):
                 G.add_edge(u, v, **data)
-
 print("GRAPH MODIFYING FINISHED!")
 print(G)
+
 
 # Calculate the total street distance
 for u, v, data in G.edges(data=True):
@@ -696,7 +698,7 @@ except:
                 u, v = shortest_path[i], shortest_path[i + 1]
                 
                 if not initial_graph.has_edge(u, v):                    
-                    edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v).get(0)
+                    edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v)
                     initial_graph.add_edge(u, v, **edge_attributes)
                     G.add_edge(u, v, **edge_attributes)                    
                 else:
@@ -723,23 +725,6 @@ except:
     deficit = {}
     surplus, deficit = calculate_surplus_and_deficit(copied_graph)
 
-    """
-    debug_surplus = {str(key): value for key, value in surplus.items()}
-    debug_deficit = {str(key): value for key, value in deficit.items()}
-    # Save the dictionaries to json files for debugging.
-    with open('surplus.json', 'w') as file:
-        json.dump(debug_surplus, file)
-    with open('deficit.json', 'w') as file:
-        json.dump(debug_deficit, file)
-    surplus_sum = 0
-    deficit_sum = 0
-    for k, v in surplus.items():
-        surplus_sum += v
-    for k, v in deficit.items():
-        deficit_sum += v
-    print("Surplus and deficit sums:", surplus_sum, deficit_sum)
-    """
-
     start_node = balance_graph(copied_graph, surplus, deficit, G_with_non_compulsory_edges, G)
 
     print("GRAPH BALANCING FINISHED!")
@@ -749,11 +734,10 @@ except:
 
     eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
     
-    '''
     print("STARTING CLEANING EULERIAN PATH!")
     eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
     print("CLEANING FINISHED!")
-    '''
+    
 
     print("EULERIAN PATH FOUND!")
 
