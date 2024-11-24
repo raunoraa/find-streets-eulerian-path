@@ -571,6 +571,7 @@ def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus
     ]
     print("PAIRS CREATED!")
 
+    print("CALCULATING SHORTEST PATHS!")
     """
     # Parallelized shortest path calculations (not working for some reason currently)
     with ProcessPoolExecutor() as executor:
@@ -586,6 +587,7 @@ def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus
     for pair in pairs:
         nodes_tuple, results_tuple = compute_path(pair, G_with_non_compulsory_edges)
         distances[nodes_tuple] = results_tuple
+    print("SHORTEST PATHS CALCULATED!")
 
     return distances
 
@@ -617,15 +619,12 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
 
     while surplus and deficit:
 
-        # Get the first existing key in the dictionary
-        surplus_node = next(iter(surplus))
-        deficit_node = next(iter(deficit))
-
         # It will suffice for an eulerian path,
         #   if we have exactly one surplus node and one deficit node left,
         #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
+        #   next(iter(dict_var)) returns the first existing key of the given dictionary
         if (len(surplus) == 1 and len(deficit) == 1) and (
-            surplus[surplus_node] == 1 and deficit[deficit_node] == 1
+            surplus[next(iter(surplus))] == 1 and deficit[next(iter(deficit))] == 1
         ):
             break
 
