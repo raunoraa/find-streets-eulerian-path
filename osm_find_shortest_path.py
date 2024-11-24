@@ -569,7 +569,7 @@ def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus
         for deficit_node in deficit_nodes
         for surplus_node in surplus_nodes
     ]
-    print("PAIRS CREATED!")
+    print("PAIRS CREATED!", "Pairs list length:", len(pairs))
 
     print("CALCULATING SHORTEST PATHS!")
     """
