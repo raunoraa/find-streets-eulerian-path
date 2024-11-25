@@ -15,7 +15,7 @@ from geopy.distance import geodesic
 import xml.etree.ElementTree as ET
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import heapq
+import os
 import time
 
 import numpy as np
@@ -557,6 +557,19 @@ def compute_path(pair, G_with_non_compulsory_edges):
     )
     return distance, shortest_path
 
+def process_chunk(chunk, G_with_non_compulsory_edges):
+    chunk_distances = {}
+    chunk_path_lookup = {}
+    for deficit_node, surplus_node in chunk:
+        # Compute shortest path for this unique pair only once
+        distance, shortest_path = compute_path(
+            (deficit_node, surplus_node), G_with_non_compulsory_edges
+        )
+
+        # Store the distance and path for future use
+        chunk_distances[(deficit_node, surplus_node)] = distance
+        chunk_path_lookup[(deficit_node, surplus_node)] = shortest_path
+    return chunk_distances, chunk_path_lookup
 
 def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     """
@@ -566,8 +579,10 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     # Precompute the shortest paths only once per unique deficit-surplus pair
     distances = {}
     path_lookup = {}
-
-    print("CALCULATING SHORTEST PATHS!")
+    
+    print("CALCULATING SHORTEST PATHS")    
+    
+    # Serial solution
     for deficit_node in deficit.keys():
         for surplus_node in surplus.keys():
             # Compute shortest path for this unique pair only once
@@ -578,8 +593,31 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
             # Store the distance and path for future use
             distances[(deficit_node, surplus_node)] = distance
             path_lookup[(deficit_node, surplus_node)] = shortest_path
-
-    print("UNIQUE SHORTEST PATHS CALCULATED!")
+    
+    '''
+    # Parallel solution
+    print("CREATE PAIRS")
+    pairs = [(deficit_node, surplus_node) for deficit_node in deficit.keys() for surplus_node in surplus.keys()]    
+    print("PAIRS CREATED")
+    
+    num_workers = os.cpu_count()
+    print("CPU count on the current system:", num_workers)
+    chunk_size = len(pairs) // num_workers + 1
+    chunks = [pairs[i: i + chunk_size] for i in range(0, len(pairs), chunk_size)]
+    
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {}        
+        for chunk in chunks:
+            futures[executor.submit(process_chunk, chunk, G_with_non_compulsory_edges)] = chunk
+                        
+        # Process completed tasks as they finish
+        for future in as_completed(futures):
+            chunk_distances, chunk_path_lookup = future.result()
+            # Store the distances and paths for future use
+            distances.update(chunk_distances)
+            path_lookup.update(chunk_path_lookup)            
+    '''
+    print("UNIQUE SHORTEST PATHS CALCULATED")
 
     # Expand the deficit and surplus nodes based on their values
     expanded_deficit_nodes = []
