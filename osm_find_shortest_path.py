@@ -22,7 +22,6 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-
 def load_osm_to_dict(osm_file_path):
     # {way_id: {tag1:value1, tag2:value2, ...}, ...}
     osm_dict = {}
@@ -558,6 +557,7 @@ def compute_path(pair, G_with_non_compulsory_edges):
     )
     return distance, shortest_path
 
+
 def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     """
     Calculate the shortest path distances between all unique deficit and surplus nodes.
@@ -571,8 +571,10 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     for deficit_node in deficit.keys():
         for surplus_node in surplus.keys():
             # Compute shortest path for this unique pair only once
-            distance, shortest_path = compute_path((deficit_node, surplus_node), G_with_non_compulsory_edges)
-            
+            distance, shortest_path = compute_path(
+                (deficit_node, surplus_node), G_with_non_compulsory_edges
+            )
+
             # Store the distance and path for future use
             distances[(deficit_node, surplus_node)] = distance
             path_lookup[(deficit_node, surplus_node)] = shortest_path
@@ -611,7 +613,15 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
             cost_matrix[i, j] = distances[(deficit_node, surplus_node)]
 
     print("EXPANDED COST MATRIX CREATED!")
-    return cost_matrix, path_lookup, expanded_deficit_nodes, expanded_surplus_nodes, deficit_mapping, surplus_mapping
+    return (
+        cost_matrix,
+        path_lookup,
+        expanded_deficit_nodes,
+        expanded_surplus_nodes,
+        deficit_mapping,
+        surplus_mapping,
+    )
+
 
 def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
     """Balance the graph by adding duplicate edges using the Hungarian algorithm."""
@@ -626,9 +636,9 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
         expanded_deficit_nodes,
         expanded_surplus_nodes,
         deficit_mapping,
-        surplus_mapping
+        surplus_mapping,
     ) = calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus)
-    
+
     print(
         "Time spent on calculating shortest paths:",
         round((time.time() - start_time) / 60, 1),
@@ -679,6 +689,7 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
 
     # Start traversing the path from the last observed surplus node.
     return surplus_node
+
 
 if __name__ == "__main__":
 
