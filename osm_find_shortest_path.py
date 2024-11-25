@@ -17,7 +17,10 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import heapq
 import time
-import functools
+
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 
 
 def load_osm_to_dict(osm_file_path):
@@ -553,88 +556,97 @@ def compute_path(pair, G_with_non_compulsory_edges):
         target=surplus_node,
         weight="distance",
     )
-    return (deficit_node, surplus_node), (distance, shortest_path)
+    return distance, shortest_path
 
-
-def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus_nodes):
+def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     """
-    Calculate the shortest path distances between all deficit and surplus nodes.
-    Returns a dictionary with distances for efficient lookup.
+    Calculate the shortest path distances between all unique deficit and surplus nodes.
+    Returns a cost matrix and a mapping to the original nodes.
     """
+    # Precompute the shortest paths only once per unique deficit-surplus pair
     distances = {}
-
-    print("CREATING PAIRS!")
-    pairs = [
-        (deficit_node, surplus_node)
-        for deficit_node in deficit_nodes
-        for surplus_node in surplus_nodes
-    ]
-    print("PAIRS CREATED!", "Pairs list length:", len(pairs))
+    path_lookup = {}
 
     print("CALCULATING SHORTEST PATHS!")
-    """
-    # Parallelized shortest path calculations (not working for some reason currently)
-    with ProcessPoolExecutor() as executor:
-        # Use executor.submit to handle each task with multiple arguments
-        futures = [executor.submit(compute_path, pair, G_with_non_compulsory_edges) for pair in pairs]
-        
-        # Retrieve the results as they are completed
-        for future in as_completed(futures):
-            (deficit_node, surplus_node), (distance, shortest_path) = future.result()
-            distances[(deficit_node, surplus_node)] = (distance, shortest_path)
-    """
-    # Sequential shortest path calculations (takes about 6.4 hours on 3/4 of Tartu)
-    for pair in pairs:
-        nodes_tuple, results_tuple = compute_path(pair, G_with_non_compulsory_edges)
-        distances[nodes_tuple] = results_tuple
-    print("SHORTEST PATHS CALCULATED!")
+    for deficit_node in deficit.keys():
+        for surplus_node in surplus.keys():
+            # Compute shortest path for this unique pair only once
+            distance, shortest_path = compute_path((deficit_node, surplus_node), G_with_non_compulsory_edges)
+            
+            # Store the distance and path for future use
+            distances[(deficit_node, surplus_node)] = distance
+            path_lookup[(deficit_node, surplus_node)] = shortest_path
 
-    return distances
+    print("UNIQUE SHORTEST PATHS CALCULATED!")
 
+    # Expand the deficit and surplus nodes based on their values
+    expanded_deficit_nodes = []
+    expanded_surplus_nodes = []
+
+    # Keep track of the original node for each expanded entry
+    deficit_mapping = []
+    surplus_mapping = []
+
+    # Expand based on deficit values
+    for node, count in deficit.items():
+        for _ in range(count):
+            expanded_deficit_nodes.append(node)
+            deficit_mapping.append(node)
+
+    # Expand based on surplus values
+    for node, count in surplus.items():
+        for _ in range(count):
+            expanded_surplus_nodes.append(node)
+            surplus_mapping.append(node)
+
+    num_deficit = len(expanded_deficit_nodes)
+    num_surplus = len(expanded_surplus_nodes)
+
+    # Initialize the cost matrix
+    cost_matrix = np.zeros((num_deficit, num_surplus))
+
+    # Populate the cost matrix using pre-computed distances
+    for i, deficit_node in enumerate(expanded_deficit_nodes):
+        for j, surplus_node in enumerate(expanded_surplus_nodes):
+            cost_matrix[i, j] = distances[(deficit_node, surplus_node)]
+
+    print("EXPANDED COST MATRIX CREATED!")
+    return cost_matrix, path_lookup, expanded_deficit_nodes, expanded_surplus_nodes, deficit_mapping, surplus_mapping
 
 def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
-    """Balance the graph by adding duplicate edges."""
+    """Balance the graph by adding duplicate edges using the Hungarian algorithm."""
 
     surplus_node = None
 
-    # Get the list of deficit and surplus nodes
-    deficit_nodes = list(deficit.keys())
-    surplus_nodes = list(surplus.keys())
-    # Precompute all shortest paths between deficit and surplus nodes
-
+    # Precompute all shortest paths and create an expanded cost matrix
     start_time = time.time()  # debugging
-    distances = calculate_shortest_paths(
-        G_with_non_compulsory_edges, deficit_nodes, surplus_nodes
-    )
+    (
+        cost_matrix,
+        path_lookup,
+        expanded_deficit_nodes,
+        expanded_surplus_nodes,
+        deficit_mapping,
+        surplus_mapping
+    ) = calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus)
+    
     print(
         "Time spent on calculating shortest paths:",
         round((time.time() - start_time) / 60, 1),
         "minutes",
     )  # debugging
 
-    # Priority queue to select the best pairings based on the shortest distance
-    pq = []
-    for (deficit_node, surplus_node), (distance, shortest_path) in distances.items():
-        heapq.heappush(pq, (distance, deficit_node, surplus_node, shortest_path))
+    # Use the Hungarian algorithm to find the optimal assignment
+    deficit_indices, surplus_indices = linear_sum_assignment(cost_matrix)
 
-    while surplus and deficit:
+    # Iterate through the optimal matches
+    for d_idx, s_idx in zip(deficit_indices, surplus_indices):
+        deficit_node = expanded_deficit_nodes[d_idx]
+        surplus_node = expanded_surplus_nodes[s_idx]
 
-        # It will suffice for an eulerian path,
-        #   if we have exactly one surplus node and one deficit node left,
-        #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
-        #   next(iter(dict_var)) returns the first existing key of the given dictionary
-        if (len(surplus) == 1 and len(deficit) == 1) and (
-            surplus[next(iter(surplus))] == 1 and deficit[next(iter(deficit))] == 1
-        ):
-            break
+        # Retrieve the shortest path for the optimal match
+        best_path = path_lookup[(deficit_node, surplus_node)]
 
-        # Get the best available pair (smallest distance)
-        distance, deficit_node, surplus_node, best_path = heapq.heappop(pq)
-
-        # Check if the selected nodes are still in surplus and deficit
-        if deficit_node not in deficit or surplus_node not in surplus:
-            continue
-
+        # Apply the selected path to balance the graph
         for i in range(len(best_path) - 1):
             u, v = best_path[i], best_path[i + 1]
 
@@ -648,18 +660,25 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
                 G.add_edge(u, v, **edge_attributes)
 
         # Reduce the surplus and deficit of the corresponding nodes.
-        surplus[surplus_node] -= 1
-        deficit[deficit_node] -= 1
+        surplus[surplus_mapping[s_idx]] -= 1
+        deficit[deficit_mapping[d_idx]] -= 1
 
         # Delete the dictionary entries if the node is no longer in surplus/deficit.
-        if surplus[surplus_node] == 0:
-            del surplus[surplus_node]
-        if deficit[deficit_node] == 0:
-            del deficit[deficit_node]
+        if surplus[surplus_mapping[s_idx]] == 0:
+            del surplus[surplus_mapping[s_idx]]
+        if deficit[deficit_mapping[d_idx]] == 0:
+            del deficit[deficit_mapping[d_idx]]
+
+        # Check the early stopping condition
+        if (len(surplus) == 1 and len(deficit) == 1) and (
+            surplus[next(iter(surplus))] == 1 and deficit[next(iter(deficit))] == 1
+        ):
+            surplus_node = next(iter(surplus))
+            print("Early stopping condition met!")
+            break
 
     # Start traversing the path from the last observed surplus node.
     return surplus_node
-
 
 if __name__ == "__main__":
 

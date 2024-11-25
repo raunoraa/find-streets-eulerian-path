@@ -14,13 +14,19 @@ from geopy.distance import geodesic
 # For parsing the osm.xml file
 import xml.etree.ElementTree as ET
 
-### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
-total_streets_length = 0.0
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import heapq
+import time
+
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
+
 
 def load_osm_to_dict(osm_file_path):
     # {way_id: {tag1:value1, tag2:value2, ...}, ...}
     osm_dict = {}
-    
+
     # Use `iterparse` to load the XML incrementally
     context = ET.iterparse(osm_file_path, events=("start", "end"))
     for event, elem in context:
@@ -28,12 +34,13 @@ def load_osm_to_dict(osm_file_path):
             osm_id = elem.get("id")
             if osm_id:
                 # Collect tags into a dictionary for the current way
-                tags = {tag.get('k'): tag.get('v') for tag in elem.findall('tag')}
+                tags = {tag.get("k"): tag.get("v") for tag in elem.findall("tag")}
                 osm_dict[osm_id] = tags
             # Clear the element from memory
             elem.clear()
-    
+
     return osm_dict
+
 
 # Load GeoJSON files
 def load_geojson(file_path):
@@ -81,11 +88,24 @@ def parse_lanes(lane_geojson, osm_dict):
     lanes_by_road_id = defaultdict(
         list
     )  # A dictionary where road_id is the key, and values are lists of lanes
-    
-    allowed_tags = set(["trunk", "trunk_link", "primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link", "residential", "unclassified"])
+
+    allowed_tags = set(
+        [
+            "trunk",
+            "trunk_link",
+            "primary",
+            "primary_link",
+            "secondary",
+            "secondary_link",
+            "tertiary",
+            "tertiary_link",
+            "residential",
+            "unclassified",
+        ]
+    )
     for lane in lane_geojson["features"]:
         if is_car_drivable(lane):
-            
+
             osm_way_id = lane["properties"]["osm_way_ids"][0]
             highway_tag_value = osm_dict[str(osm_way_id)]["highway"]
             if highway_tag_value in allowed_tags:
@@ -256,10 +276,10 @@ def create_graph(lanes, intersections):
                 e_node_id, _, e_geometry, _ = e_node
                 for l_node in leaving_nodes:
                     l_node_id, _, l_geometry, _ = l_node
-                    
+
                     coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
                     intersection_road_distance = find_lane_distance(coords)
-                    
+
                     # Dont add backward turns to intersection (add to the graph, which contains non-compulsory edges)
                     if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
                         G_with_non_compulsory_edges.add_edge(
@@ -269,7 +289,7 @@ def create_graph(lanes, intersections):
                             distance=intersection_road_distance,  # 4.0,
                             edge_type="intersection",
                         )
-                        continue                    
+                        continue
 
                     # For the edges that are inside the intersection, assign the distance to be 4.0 meters and
                     # street name is None
@@ -281,11 +301,11 @@ def create_graph(lanes, intersections):
                         edge_type="intersection",
                     )
                     G_with_non_compulsory_edges.add_edge(
-                            e_node_id,
-                            l_node_id,
-                            geometry=LineString([e_geometry, l_geometry]),
-                            distance=intersection_road_distance,  # 4.0,
-                            edge_type="intersection",
+                        e_node_id,
+                        l_node_id,
+                        geometry=LineString([e_geometry, l_geometry]),
+                        distance=intersection_road_distance,  # 4.0,
+                        edge_type="intersection",
                     )
 
     # Create edges outside the intersections (basically add the lanes)
@@ -370,20 +390,6 @@ def build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file):
     G, int_ids, G_with_non_compulsory_edges = create_graph(lanes, intersections)
 
     return G, int_ids, G_with_non_compulsory_edges
-
-
-folder_path = "map_files/observable_geojson_files/"
-
-lane_geojson_file = folder_path + "Lane_polygons.geojson"
-intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
-
-osm_file = "map_files/osm_observable.xml"
-
-print()
-print("INIT")
-# Build the graph
-G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(lane_geojson_file, intersection_geojson_file, osm_file)
-print("GRAPH BUILDING FINISHED!")
 
 
 def assign_edge_orders_with_multiple_traversals(path, G):
@@ -519,226 +525,236 @@ def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
 
     print(f"Graph saved to {output_file}")
 
-def clean_eulerian_path(graph, eulerian_path):
-    """
-    Remove redundant duplicate loops from an Eulerian path.
 
-    Parameters:
-        graph: nx.MultiDiGraph
-            The graph in which the Eulerian path exists.
-        eulerian_path: list of tuples (u, v)
-            The Eulerian path as a list of edges.
-
-    Returns:
-        list of tuples: The cleaned Eulerian path without redundant loops (detects loops that are next to each other in the eulerian path list).
-    """
-    max_loop_length = 30
-    min_loop_length = 3
-    
-    observed_loop = []
-    compared_edges = []
-    reduntant_loop_identified = False
-
-    cleaned_path = eulerian_path.copy()
-    observable_loop_length = max_loop_length
-    node_indexes_to_remove = []
-
-    while observable_loop_length >= min_loop_length:
-        
-        if len(cleaned_path) <= observable_loop_length * 2:
-            break
-        
-        i = 0
-        while i < len(cleaned_path) - observable_loop_length:
-            
-            # check if we are looking at a loop currently
-            start = cleaned_path[i]
-            end = cleaned_path[i+observable_loop_length]
-            if start == end:
-                
-                for j in range(i, i+observable_loop_length):                    
-                    observed_loop.append(cleaned_path[j])
-                
-                temp_path_idx = i + observable_loop_length
-                j = 0
-                while j < len(cleaned_path) - observable_loop_length:
-                    compared_edges = [edge for edge in cleaned_path[j:j+observable_loop_length]]
-                    if observed_loop == compared_edges:
-                        #print(observed_loop, compared_edges)
-                        # we can safely remove the loop here
-                        node_indexes_to_remove += [idx for idx in range(j, j+observable_loop_length)]
-                        reduntant_loop_identified = True
-                    else:                        
-                        break
-                    j += observable_loop_length
-                observed_loop = []
-                compared_edges = []
-                if reduntant_loop_identified:
-                    reduntant_loop_identified = False
-                    i = j + observable_loop_length
-                else:
-                    i = temp_path_idx
-            else:
-                i += 1            
-                    
-        if node_indexes_to_remove:
-            #print("FOUND REDUNDACNY!", observable_loop_length, node_indexes_to_remove)
-            #print("FOUND REDUNDANCY!", observable_loop_length)
-            for k in range(len(node_indexes_to_remove) - 1, -1, -1):
-                idx = node_indexes_to_remove[k]
-                del cleaned_path[idx]
-            node_indexes_to_remove = []
-        
-        observable_loop_length -= 1
-
-    return cleaned_path
-
-###
-# Find the shortest path to visit each graph edge at least once
-###
-
-# Find the largest strongly connected component of the graph
-if not nx.is_strongly_connected(G):
-    components = list(nx.strongly_connected_components(G))
-    largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))
-    # print(G)
-    G = G.subgraph(largest_component).copy()
-    # print(G)
-if not nx.is_strongly_connected(G_with_non_compulsory_edges):
-    components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
-    largest_component = max(components, key=lambda c: (len(c), G_with_non_compulsory_edges.subgraph(c).size()))
-    G_with_non_compulsory_edges = G_with_non_compulsory_edges.subgraph(largest_component).copy()
-
-
-###
-# Remove edges inside the intersections
-# (Sometimes makes the coefficient better, sometimes worse)
-###
-edges = list(G.edges(data=True))
-for u, v, data in edges:
-    if data.get("edge_type") == "intersection":
-        if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
-            G.remove_edge(u, v)
-            if not nx.is_strongly_connected(G):
-                G.add_edge(u, v, **data)
-print("GRAPH MODIFYING FINISHED!")
-print(G)
-
-
-# Calculate the total street distance
-for u, v, data in G.edges(data=True):
-    total_streets_length += data["distance"]
-
-
-# Try to get the eulerian path of the graph
-try:
-    eulerian_path = list(nx.eulerian_path(G))
-
-    # print(len(list(G.edges())), len(eulerian_path))
-
-    print("EULERIAN PATH FOUND WITHOUT BALANCING!")
-
-    save_graph_to_geopackage(eulerian_path, G)
-
-
-except:
-    ###
-    # We need to balance the graph if no eulerian path was found.
-    ###
-
-    print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
-    print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
-
-    def calculate_surplus_and_deficit(graph):
-        """Calculate surplus and deficit nodes based on in-degree and out-degree."""
-
-        surplus = {}
-        deficit = {}
-
-        for node in graph.nodes():
-            out_degree = graph.out_degree(node)
-            in_degree = graph.in_degree(node)
-
-            # Calculate the difference between out-degree and in-degree
-            difference = out_degree - in_degree
-
-            # Classify as surplus or deficit based on the difference
-            if difference > 0:
-                surplus[node] = difference  # More outgoing edges than incoming
-            elif difference < 0:
-                deficit[node] = abs(difference)  # More incoming edges than outgoing
-
-        return surplus, deficit
-
-    def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
-        """Balance the graph by adding duplicate edges."""
-
-        surplus_node = None
-
-        while surplus and deficit:
-            # Get the first existing key in the dictionary
-            surplus_node = next(iter(surplus))
-            deficit_node = next(iter(deficit))
-
-            # It will suffice for an eulerian path,
-            #   if we have exactly one surplus node and one deficit node left,
-            #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
-            if (len(surplus) == 1 and len(deficit) == 1) and (
-                surplus[surplus_node] == 1 and deficit[deficit_node] == 1
-            ):
-                break
-
-            # Find the shortest path from the deficit node to the surplus node.
-            # Duplicate the edges in this path.
-            shortest_path = nx.dijkstra_path(
-                G_with_non_compulsory_edges, source=deficit_node, target=surplus_node, weight="distance"
-            )
-
-            for i in range(len(shortest_path) - 1):
-                u, v = shortest_path[i], shortest_path[i + 1]
-                
-                if not initial_graph.has_edge(u, v):                    
-                    edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v)
-                    initial_graph.add_edge(u, v, **edge_attributes)
-                    G.add_edge(u, v, **edge_attributes)                    
-                else:
-                    # Add a copy of an existing edge to the graph.
-                    edge_attributes = G.get_edge_data(u, v).get(0)
-                    G.add_edge(u, v, **edge_attributes)
-
-            # Reduce the surplus and deficit of the corresponding nodes.
-            surplus[surplus_node] -= 1
-            deficit[deficit_node] -= 1
-
-            # Delete the dictionary entries if the node is no longer in surplus/deficit.
-            if surplus[surplus_node] == 0:
-                del surplus[surplus_node]
-            if deficit[deficit_node] == 0:
-                del deficit[deficit_node]
-
-        # Start traversing the path from the last observed surplus node.
-        return surplus_node
-
-    copied_graph = nx.MultiDiGraph(G)
+def calculate_surplus_and_deficit(graph):
+    """Calculate surplus and deficit nodes based on in-degree and out-degree."""
 
     surplus = {}
     deficit = {}
-    surplus, deficit = calculate_surplus_and_deficit(copied_graph)
 
-    start_node = balance_graph(copied_graph, surplus, deficit, G_with_non_compulsory_edges, G)
+    for node in graph.nodes():
+        out_degree = graph.out_degree(node)
+        in_degree = graph.in_degree(node)
 
-    print("GRAPH BALANCING FINISHED!")
+        # Calculate the difference between out-degree and in-degree
+        difference = out_degree - in_degree
 
-    # Show the edge count for graph before and after the balancing.
-    # print(len(list(G.edges())), len(list(copied_graph.edges())))
+        # Classify as surplus or deficit based on the difference
+        if difference > 0:
+            surplus[node] = difference  # More outgoing edges than incoming
+        elif difference < 0:
+            deficit[node] = abs(difference)  # More incoming edges than outgoing
 
-    eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
-    
-    #print("STARTING CLEANING EULERIAN PATH!")
-    #eulerian_path = clean_eulerian_path(copied_graph, eulerian_path)
-    #print("CLEANING FINISHED!")
-    
+    return surplus, deficit
 
-    print("EULERIAN PATH FOUND!")
 
-    save_graph_to_geopackage(eulerian_path, G)
+def compute_path(pair, G_with_non_compulsory_edges):
+    deficit_node, surplus_node = pair
+    distance, shortest_path = nx.single_source_dijkstra(
+        G_with_non_compulsory_edges,
+        source=deficit_node,
+        target=surplus_node,
+        weight="distance",
+    )
+    return (deficit_node, surplus_node), (distance, shortest_path)
+
+
+def calculate_shortest_paths(G_with_non_compulsory_edges, deficit_nodes, surplus_nodes):
+    """
+    Calculate the shortest path distances between all deficit and surplus nodes.
+    Returns a dictionary with distances for efficient lookup.
+    """
+    distances = {}
+
+    print("CREATING PAIRS!")
+    pairs = [
+        (deficit_node, surplus_node)
+        for deficit_node in deficit_nodes
+        for surplus_node in surplus_nodes
+    ]
+    print("PAIRS CREATED!", "Pairs list length:", len(pairs))
+
+    print("CALCULATING SHORTEST PATHS!")
+    """
+    # Parallelized shortest path calculations (not working for some reason currently)
+    with ProcessPoolExecutor() as executor:
+        # Use executor.submit to handle each task with multiple arguments
+        futures = [executor.submit(compute_path, pair, G_with_non_compulsory_edges) for pair in pairs]
+        
+        # Retrieve the results as they are completed
+        for future in as_completed(futures):
+            (deficit_node, surplus_node), (distance, shortest_path) = future.result()
+            distances[(deficit_node, surplus_node)] = (distance, shortest_path)
+    """
+    # Sequential shortest path calculations (takes about 6.4 hours on 3/4 of Tartu)
+    for pair in pairs:
+        nodes_tuple, results_tuple = compute_path(pair, G_with_non_compulsory_edges)
+        distances[nodes_tuple] = results_tuple
+    print("SHORTEST PATHS CALCULATED!")
+
+    return distances
+
+
+def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_graph):
+    """Balance the graph by adding duplicate edges."""
+
+    surplus_node = None
+
+    # Get the list of deficit and surplus nodes
+    deficit_nodes = list(deficit.keys())
+    surplus_nodes = list(surplus.keys())
+    # Precompute all shortest paths between deficit and surplus nodes
+
+    start_time = time.time()  # debugging
+    distances = calculate_shortest_paths(
+        G_with_non_compulsory_edges, deficit_nodes, surplus_nodes
+    )
+    print(
+        "Time spent on calculating shortest paths:",
+        round((time.time() - start_time) / 60, 1),
+        "minutes",
+    )  # debugging
+
+    # Priority queue to select the best pairings based on the shortest distance
+    pq = []
+    for (deficit_node, surplus_node), (distance, shortest_path) in distances.items():
+        heapq.heappush(pq, (distance, deficit_node, surplus_node, shortest_path))
+
+    while surplus and deficit:
+
+        # It will suffice for an eulerian path,
+        #   if we have exactly one surplus node and one deficit node left,
+        #   the surplus node must have a surplus of 1 and the deficit node must have a deficit of 1.
+        #   next(iter(dict_var)) returns the first existing key of the given dictionary
+        if (len(surplus) == 1 and len(deficit) == 1) and (
+            surplus[next(iter(surplus))] == 1 and deficit[next(iter(deficit))] == 1
+        ):
+            break
+
+        # Get the best available pair (smallest distance)
+        distance, deficit_node, surplus_node, best_path = heapq.heappop(pq)
+
+        # Check if the selected nodes are still in surplus and deficit
+        if deficit_node not in deficit or surplus_node not in surplus:
+            continue
+
+        for i in range(len(best_path) - 1):
+            u, v = best_path[i], best_path[i + 1]
+
+            if not initial_graph.has_edge(u, v):
+                edge_attributes = G_with_non_compulsory_edges.get_edge_data(u, v)
+                initial_graph.add_edge(u, v, **edge_attributes)
+                G.add_edge(u, v, **edge_attributes)
+            else:
+                # Add a copy of an existing edge to the graph.
+                edge_attributes = G.get_edge_data(u, v).get(0)
+                G.add_edge(u, v, **edge_attributes)
+
+        # Reduce the surplus and deficit of the corresponding nodes.
+        surplus[surplus_node] -= 1
+        deficit[deficit_node] -= 1
+
+        # Delete the dictionary entries if the node is no longer in surplus/deficit.
+        if surplus[surplus_node] == 0:
+            del surplus[surplus_node]
+        if deficit[deficit_node] == 0:
+            del deficit[deficit_node]
+
+    # Start traversing the path from the last observed surplus node.
+    return surplus_node
+
+
+if __name__ == "__main__":
+
+    ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
+    total_streets_length = 0.0
+
+    folder_path = "map_files/observable_geojson_files/"
+
+    lane_geojson_file = folder_path + "Lane_polygons.geojson"
+    intersection_geojson_file = folder_path + "Intersection_polygons.geojson"
+
+    osm_file = "map_files/osm_observable.xml"
+
+    print()
+    print("INIT")
+    # Build the graph
+    G, intersection_ids, G_with_non_compulsory_edges = build_city_graph(
+        lane_geojson_file, intersection_geojson_file, osm_file
+    )
+    print("GRAPH BUILDING FINISHED!")
+
+    # Find the largest strongly connected component of the graph
+    if not nx.is_strongly_connected(G):
+        components = list(nx.strongly_connected_components(G))
+        largest_component = max(
+            components, key=lambda c: (len(c), G.subgraph(c).size())
+        )
+        # print(G)
+        G = G.subgraph(largest_component).copy()
+        # print(G)
+    if not nx.is_strongly_connected(G_with_non_compulsory_edges):
+        components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
+        largest_component = max(
+            components,
+            key=lambda c: (len(c), G_with_non_compulsory_edges.subgraph(c).size()),
+        )
+        G_with_non_compulsory_edges = G_with_non_compulsory_edges.subgraph(
+            largest_component
+        ).copy()
+
+    ###
+    # Remove as much edges inside the intersections as possible
+    ###
+    edges = list(G.edges(data=True))
+    for u, v, data in edges:
+        if data.get("edge_type") == "intersection":
+            if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
+                G.remove_edge(u, v)
+                if not nx.is_strongly_connected(G):
+                    G.add_edge(u, v, **data)
+    print("GRAPH MODIFYING FINISHED!")
+    print(G)
+
+    # Calculate the total street distance
+    for u, v, data in G.edges(data=True):
+        total_streets_length += data["distance"]
+
+    # Try to get the eulerian path of the graph
+    try:
+        eulerian_path = list(nx.eulerian_path(G))
+
+        # print(len(list(G.edges())), len(eulerian_path))
+
+        print("EULERIAN PATH FOUND WITHOUT BALANCING!")
+
+        save_graph_to_geopackage(eulerian_path, G)
+
+    except:
+        ###
+        # We need to balance the graph if no eulerian path was found.
+        ###
+
+        print("EULERIAN PATH NOT FOUND WITHOUT BALANCING!")
+        print("BALANCING THE GRAPH TO FIND THE EULERIAN PATH...")
+
+        copied_graph = nx.MultiDiGraph(G)
+
+        surplus = {}
+        deficit = {}
+        surplus, deficit = calculate_surplus_and_deficit(copied_graph)
+
+        start_node = balance_graph(
+            copied_graph, surplus, deficit, G_with_non_compulsory_edges, G
+        )
+
+        print("GRAPH BALANCING FINISHED!")
+
+        # Show the edge count for graph before and after the balancing.
+        # print(len(list(G.edges())), len(list(copied_graph.edges())))
+
+        eulerian_path = list(nx.eulerian_path(copied_graph, source=start_node))
+
+        print("EULERIAN PATH FOUND!")
+
+        save_graph_to_geopackage(eulerian_path, G)
