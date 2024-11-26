@@ -471,18 +471,22 @@ def create_node_features_for_qgis(G):
     return nodes_gdf
 
 
-def save_results_as_txt(eulerian_path_distance, coefficient):
+def save_results_as_txt(eulerian_path_distance, coefficient, time_spent):
+    time_spent_string = f"Program execution completed in {time_spent} minutes."
     distances_string = f"Street lanes distance: {round(total_streets_length, 4)}m ;; Eulerian path distance: {round(eulerian_path_distance, 4)}m"
     coefficient_string = f"Coefficient: {round(coefficient, 4)}"
 
     # Write the results to a text file as well
     results_file = open("results.txt", "w", encoding="utf-8")
+    results_file.write(time_spent_string)
+    results_file.write("\n")
     results_file.write(distances_string)
     results_file.write("\n")
     results_file.write(coefficient_string)
     results_file.close()
 
     print()
+    print(time_spent_string)
     print(distances_string)
     print(coefficient_string)
     print()
@@ -504,7 +508,7 @@ def calculate_path_distance_and_coefficient(path, G):
     return path_distance, coefficient
 
 
-def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
+def save_graph_to_geopackage(path, G, time_spent, output_file="output.gpkg"):
     """
     Create a GeoDataFrame from the graph (nodes and edges) and save it to a GeoPackage.
     """
@@ -520,7 +524,7 @@ def save_graph_to_geopackage(path, G, output_file="output.gpkg"):
 
     # Save the eulerian path length and coefficient results to txt file.
     path_d, coef = calculate_path_distance_and_coefficient(path, G)
-    save_results_as_txt(path_d, coef)
+    save_results_as_txt(path_d, coef, time_spent)
 
     print(f"Graph saved to {output_file}")
 
@@ -547,29 +551,26 @@ def calculate_surplus_and_deficit(graph):
     return surplus, deficit
 
 
-def compute_path(pair, G_with_non_compulsory_edges):
-    deficit_node, surplus_node = pair
-    distance, shortest_path = nx.single_source_dijkstra(
-        G_with_non_compulsory_edges,
-        source=deficit_node,
-        target=surplus_node,
-        weight="distance",
-    )
-    return distance, shortest_path
-
-def process_chunk(chunk, G_with_non_compulsory_edges):
+def process_chunk(deficit_node_chunk, surplus_node_set, G_with_non_compulsory_edges):
     chunk_distances = {}
-    chunk_path_lookup = {}
-    for deficit_node, surplus_node in chunk:
+    chunk_shortest_paths = {}
+    for deficit_node in deficit_node_chunk:
         # Compute shortest path for this unique pair only once
-        distance, shortest_path = compute_path(
-            (deficit_node, surplus_node), G_with_non_compulsory_edges
+        distances_single_source, paths_single_source = nx.single_source_dijkstra(
+            G_with_non_compulsory_edges,
+            source=deficit_node,
+            weight="distance",
         )
+        for surplus_node in surplus_node_set:
+            chunk_distances[(deficit_node, surplus_node)] = distances_single_source[
+                surplus_node
+            ]
+            chunk_shortest_paths[(deficit_node, surplus_node)] = paths_single_source[
+                surplus_node
+            ]
 
-        # Store the distance and path for future use
-        chunk_distances[(deficit_node, surplus_node)] = distance
-        chunk_path_lookup[(deficit_node, surplus_node)] = shortest_path
-    return chunk_distances, chunk_path_lookup
+    return chunk_distances, chunk_shortest_paths
+
 
 def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     """
@@ -578,45 +579,59 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     """
     # Precompute the shortest paths only once per unique deficit-surplus pair
     distances = {}
-    path_lookup = {}
-    
-    print("CALCULATING SHORTEST PATHS")    
-    
-    # Serial solution
-    for deficit_node in deficit.keys():
-        for surplus_node in surplus.keys():
-            # Compute shortest path for this unique pair only once
-            distance, shortest_path = compute_path(
-                (deficit_node, surplus_node), G_with_non_compulsory_edges
+    shortest_paths = {}
+
+    print("CALCULATING SHORTEST PATHS")
+
+    num_workers = os.cpu_count()
+    deficit_node_list, surplus_node_set = list(deficit.keys()), set(surplus.keys())
+
+    # If we are given a smaller graph, dont parallelize the solution
+    if num_workers >= len(deficit_node_list):
+        # Serial solution
+        print("Using serial solution")
+        for deficit_node in deficit.keys():
+            # Use single_source_dijkstra to compute distances from the current deficit node
+            distances_single_source, paths_single_source = nx.single_source_dijkstra(
+                G_with_non_compulsory_edges, source=deficit_node, weight="distance"
             )
 
-            # Store the distance and path for future use
-            distances[(deficit_node, surplus_node)] = distance
-            path_lookup[(deficit_node, surplus_node)] = shortest_path
-    
-    '''
-    # Parallel solution
-    print("CREATE PAIRS")
-    pairs = [(deficit_node, surplus_node) for deficit_node in deficit.keys() for surplus_node in surplus.keys()]    
-    print("PAIRS CREATED")
-    
-    num_workers = os.cpu_count()
-    print("CPU count on the current system:", num_workers)
-    chunk_size = len(pairs) // num_workers + 1
-    chunks = [pairs[i: i + chunk_size] for i in range(0, len(pairs), chunk_size)]
-    
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {}        
-        for chunk in chunks:
-            futures[executor.submit(process_chunk, chunk, G_with_non_compulsory_edges)] = chunk
-                        
-        # Process completed tasks as they finish
-        for future in as_completed(futures):
-            chunk_distances, chunk_path_lookup = future.result()
-            # Store the distances and paths for future use
-            distances.update(chunk_distances)
-            path_lookup.update(chunk_path_lookup)            
-    '''
+            for surplus_node in surplus_node_set:
+                distances[(deficit_node, surplus_node)] = distances_single_source[
+                    surplus_node
+                ]
+                shortest_paths[(deficit_node, surplus_node)] = paths_single_source[
+                    surplus_node
+                ]
+    else:
+        # Parallel solution
+        print("Using parallel solution")
+        print("CPU count on the current system:", num_workers)
+        chunk_size = len(deficit_node_list) // num_workers + 1
+        chunks = [
+            deficit_node_list[i : i + chunk_size]
+            for i in range(0, len(deficit_node_list), chunk_size)
+        ]
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {}
+            for chunk in chunks:
+                futures[
+                    executor.submit(
+                        process_chunk,
+                        chunk,
+                        surplus_node_set,
+                        G_with_non_compulsory_edges,
+                    )
+                ] = chunk
+
+            # Process completed tasks as they finish
+            for future in as_completed(futures):
+                chunk_distances, chunk_shortest_paths = future.result()
+                # Store the distances and paths for future use
+                distances.update(chunk_distances)
+                shortest_paths.update(chunk_shortest_paths)
+
     print("UNIQUE SHORTEST PATHS CALCULATED")
 
     # Expand the deficit and surplus nodes based on their values
@@ -653,7 +668,7 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     print("EXPANDED COST MATRIX CREATED!")
     return (
         cost_matrix,
-        path_lookup,
+        shortest_paths,
         expanded_deficit_nodes,
         expanded_surplus_nodes,
         deficit_mapping,
@@ -670,7 +685,7 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
     start_time = time.time()  # debugging
     (
         cost_matrix,
-        path_lookup,
+        shortest_paths,
         expanded_deficit_nodes,
         expanded_surplus_nodes,
         deficit_mapping,
@@ -692,7 +707,7 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
         surplus_node = expanded_surplus_nodes[s_idx]
 
         # Retrieve the shortest path for the optimal match
-        best_path = path_lookup[(deficit_node, surplus_node)]
+        best_path = shortest_paths[(deficit_node, surplus_node)]
 
         # Apply the selected path to balance the graph
         for i in range(len(best_path) - 1):
@@ -731,6 +746,8 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
 
 if __name__ == "__main__":
 
+    timer = time.time()
+
     ### GLOBAL VARIABLE FOR STORING THE TOTAL LENGTH OF THE STREETS
     total_streets_length = 0.0
 
@@ -755,9 +772,7 @@ if __name__ == "__main__":
         largest_component = max(
             components, key=lambda c: (len(c), G.subgraph(c).size())
         )
-        # print(G)
         G = G.subgraph(largest_component).copy()
-        # print(G)
     if not nx.is_strongly_connected(G_with_non_compulsory_edges):
         components = list(nx.strongly_connected_components(G_with_non_compulsory_edges))
         largest_component = max(
@@ -769,14 +784,16 @@ if __name__ == "__main__":
         ).copy()
 
     ###
-    # Remove as much edges inside the intersections as possible
+    # Remove as much edges inside the intersections as possible for the main graph
     ###
     edges = list(G.edges(data=True))
     for u, v, data in edges:
         if data.get("edge_type") == "intersection":
             if not (G.out_degree(u) <= 1 or G.in_degree(v) <= 1):
                 G.remove_edge(u, v)
-                if not nx.is_strongly_connected(G):
+                # If the graph does not have a path from u to v after the edge removal,
+                # it means that the strong connectivity of the graph is broken and we need to add the edge back.
+                if not nx.has_path(G, u, v):
                     G.add_edge(u, v, **data)
     print("GRAPH MODIFYING FINISHED!")
     print(G)
@@ -822,4 +839,5 @@ if __name__ == "__main__":
 
         print("EULERIAN PATH FOUND!")
 
-        save_graph_to_geopackage(eulerian_path, G)
+        time_spent = round((time.time() - timer) / 60, 4)
+        save_graph_to_geopackage(eulerian_path, G, time_spent)

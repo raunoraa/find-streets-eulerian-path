@@ -1,2 +1,3 @@
-Street lanes distance: 385819.5292m ;; Eulerian path distance: 565505.3362m
-Coefficient: 1.4657
+Program execution completed in 2.6075 minutes.
+Street lanes distance: 386110.8298m ;; Eulerian path distance: 570452.7178m
+Coefficient: 1.4774
