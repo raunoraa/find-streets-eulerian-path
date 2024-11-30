@@ -55,4 +55,59 @@ Ensure you have Python 3.13 or higher installed. You’ll also need `pip` for pa
 ## 🚀 **Usage**
 
 ### **Input Files**
-The program requires input files generated from the [osm2streets](https://a-b-street.github.io/osm2streets/) web app.
+The program requires input files generated from the [osm2streets](https://a-b-street.github.io/osm2streets/) web app. `osm2streets` generates files based on a selected geographic area, and this program will process the same area to compute the shortest path for traversing all street lanes.
+
+#### **Required Files from `osm2streets`:**
+
+**1. Lane Polygons GeoJSON:**
+Contains road lane data with geometries.
+
+**2. Intersection Polygons GeoJSON:**
+Contains intersection relations and geometries.
+
+**3. OSM XML:**
+Represents raw OpenStreetMap data.
+
+
+### **Running the program**
+
+1. Ensure the required input files are placed in the locations that have been specified in the `config.py` file. It is recommended to leave the locations as they are for simplicity (for example `.gitignore` is configured in a way that potentially large input and output files are not pushed to GitHub if the locations are not changed).
+
+2. Run the program:
+    ```bash
+   python main.py
+    ```
+
+---
+
+## 📄 **Output**
+
+The program generates the following output files in the locations that have been specified in the `config.py` file:
+
+**1. GeoPackage**
+
+Contains:
+- **Edges** layer with Eulerian path traversal orders and geometries.
+- **Nodes** layer with geometries of street intersections.<br><br>
+
+**2. Text File**
+
+Includes:
+- **Total length of the street lanes** in meters.
+- **Length of the Eulerian path** in meters.
+- **Coefficient**, which shows the efficiency of the Eulerian path (Eulerian path divided by length of the street lanes).
+- **Execution time** in minutes.
+
+---
+
+## 🤝 **Contributing**
+While this repository is publicly available, contributions are not accepted until I have defended my thesis.
+
+---
+
+## 📝 **License**
+This project is open-source and licensed under the MIT License, allowing free use, modification, and distribution. See the `LICENSE` file for more details.
+
+**Note:** The project was developed as part of a bachelor's thesis at the **University of Tartu, Institute of Computer Science** and is made publicly available for further academic and practical exploration.
+
+---
