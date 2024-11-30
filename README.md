@@ -13,6 +13,7 @@ A Python tool designed to find the shortest path to traverse all street lanes in
   - [Input Files](#input-files)
   - [Running the Program](#running-the-program)
 - [📄 Output](#-output)
+- [📊 Examples](#-examples)
 - [🤝 Contributing](#-contributing)
 - [📝 License](#-license)
 
@@ -97,6 +98,14 @@ Includes:
 - **Length of the Eulerian path** in meters.
 - **Coefficient**, which shows the efficiency of the Eulerian path (Eulerian path divided by length of the street lanes).
 - **Execution time** in minutes.
+
+---
+
+## **📊 Examples**
+
+I have included some examples of the input files and the results of running the program with them. <br>
+I have also included the qgz file, which has the necessary QGIS configuration already done to view the animation of the output file. <br>
+You can find the examples in this [Google Drive folder](https://drive.google.com/drive/folders/1iLgaCyLz092MU7t6YOZGydiwEh6wuK1s?usp=sharing).
 
 ---
 
