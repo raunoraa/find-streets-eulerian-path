@@ -71,7 +71,7 @@ Represents raw OpenStreetMap data.
 
 ### **Running the program**
 
-1. Ensure the required input files are placed in the locations that have been specified in the `config.py` file. It is recommended to leave the locations as they are for simplicity (for example `.gitignore` is configured in a way that potentially large input and output files are not pushed to GitHub if the locations are not changed).
+1. Ensure the required input files are placed in the locations that have been specified in the `config.py` file.<br> It is recommended to leave the locations as they are for simplicity (for example `.gitignore` is configured in a way that potentially large input and output files are not pushed to GitHub if the locations are not changed).
 
 2. Run the program:
     ```bash
