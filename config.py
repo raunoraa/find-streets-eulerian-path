@@ -7,6 +7,6 @@ INTERSECTIONS_GEOJSON_FILE_PATH = "map_files/Intersection polygons.geojson"
 OSM_XML_FILE_PATH = "map_files/osm.xml"
 
 # Paths, where to save the output files (recommended to leave the folder names as they are).
-# Output folder is created automatically if it doesn't exist yet. The folder itself and the files inside are not tracked by Git.
+# Folders are created automatically if they don't exist yet. The folder itself and the files inside are not tracked by Git.
 OUTPUT_GPKG_FILE_PATH = "output/output.gpkg"
 OUTPUT_TXT_FILE_PATH = "output/results.txt"
