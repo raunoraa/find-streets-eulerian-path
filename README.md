@@ -18,14 +18,14 @@ A Python tool designed to find the shortest path to traverse all street lanes in
 
 ---
 
-## 🏛️ **About the Project**
+## **🏛️ About the Project**
 This project is part of a **bachelor's thesis** at the **University of Tartu, Institute of Computer Science**. The primary goal is to develop a tool that models city street networks using graph theory, computes an **Eulerian path** for all connected street lanes, and outputs a path that is optimal for driving through all lanes efficiently. The results are intended for **geospatial visualization in QGIS** and practical applications in optimizing urban logistics.  
 
 While this project was primarily developed for academic purposes, it is publicly available, and contributions are welcome. However, future maintenance may be limited after the thesis defense.
 
 ---
 
-## ✨ **Features**
+## **✨ Features**
 - Builds a graph from **OSM XML** and **GeoJSON** input files representing road networks.
 - Balances the graph (if needed) and computes the **Eulerian path** for all connected street segments.
 - Exports results to:
@@ -34,7 +34,7 @@ While this project was primarily developed for academic purposes, it is publicly
 
 ---
 
-## ⚙️ **Installation**
+## **⚙️ Installation**
 
 ### **Prerequisites**
 Ensure you have Python 3.13 or higher installed. You’ll also need `pip` for package management.
@@ -52,7 +52,7 @@ Ensure you have Python 3.13 or higher installed. You’ll also need `pip` for pa
 
 ---
 
-## 🚀 **Usage**
+## **🚀 Usage**
 
 ### **Input Files**
 The program requires input files generated from the [osm2streets](https://a-b-street.github.io/osm2streets/) web app. `osm2streets` generates files based on a selected geographic area, and this program will process the same area to compute the shortest path for traversing all street lanes.
@@ -80,7 +80,7 @@ Represents raw OpenStreetMap data.
 
 ---
 
-## 📄 **Output**
+## **📄 Output**
 
 The program generates the following output files in the locations that have been specified in the `config.py` file:
 
@@ -100,12 +100,12 @@ Includes:
 
 ---
 
-## 🤝 **Contributing**
+## **🤝 Contributing**
 While this repository is publicly available, contributions are not accepted until I have defended my thesis.
 
 ---
 
-## 📝 **License**
+## **📝 License**
 This project is open-source and licensed under the MIT License, allowing free use, modification, and distribution. See the `LICENSE` file for more details.
 
 **Note:** The project was developed as part of a bachelor's thesis at the **University of Tartu, Institute of Computer Science** and is made publicly available for further academic and practical exploration.
