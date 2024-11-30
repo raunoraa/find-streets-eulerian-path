@@ -1,5 +1,7 @@
 __pycache__
 .vscode
-*.html
+
 output/
-*.json
+
+input_files/*
+!input_files/README.md
