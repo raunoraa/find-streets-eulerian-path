@@ -4,17 +4,17 @@ A Python tool designed to find the shortest path to traverse all street lanes in
 ---
 
 ## 📋 **Table of Contents**
-- [🏛️ About the Project](#about-the-project)
-- [✨ Features](#features)
-- [⚙️ Installation](#installation)
+- [🏛️ About the Project](#-about-the-project)
+- [✨ Features](#-features)
+- [⚙️ Installation](#-installation)
   - [Prerequisites](#prerequisites)
   - [Installing Dependencies](#installing-dependencies)
-- [🚀 Usage](#usage)
+- [🚀 Usage](#-usage)
   - [Input Files](#input-files)
   - [Running the Program](#running-the-program)
-- [📄 Output](#output)
-- [🤝 Contributing](#contributing)
-- [📝 License](#license)
+- [📄 Output](#-output)
+- [🤝 Contributing](#-contributing)
+- [📝 License](#-license)
 
 ---
 
