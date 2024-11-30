@@ -1,3 +1,0 @@
-Program execution completed in 2.6075 minutes.
-Street lanes distance: 386110.8298m ;; Eulerian path distance: 570452.7178m
-Coefficient: 1.4774
