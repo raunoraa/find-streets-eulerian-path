@@ -55,4 +55,4 @@ Ensure you have Python 3.13 or higher installed. You’ll also need `pip` for pa
 ## 🚀 **Usage**
 
 ### **Input Files**
-The program requires input files generated from the <a href="https://a-b-street.github.io/osm2streets/" target="_blank">osm2streets</a> web app.
+The program requires input files generated from the [osm2streets](https://a-b-street.github.io/osm2streets/) web app.
