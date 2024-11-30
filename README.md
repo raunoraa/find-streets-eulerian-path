@@ -103,8 +103,7 @@ Includes:
 
 ## **📊 Examples**
 
-I have included some examples of the input files and the results of running the program with them. <br>
-I have also included the qgz file, which has the necessary QGIS configuration already done to view the animation of the output file. <br>
+I have included some examples of the input files and the results of running the program with them. I have also included `qgz` file, which has the necessary QGIS configuration already done to view the animation of the output file. <br><br>
 You can find the examples in this [Google Drive folder](https://drive.google.com/drive/folders/1iLgaCyLz092MU7t6YOZGydiwEh6wuK1s?usp=sharing).
 
 ---
