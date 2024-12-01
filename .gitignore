@@ -5,3 +5,5 @@ output/
 
 input_files/*
 !input_files/README.md
+
+*.qgz
