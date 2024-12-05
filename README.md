@@ -20,9 +20,7 @@ A Python tool designed to find the shortest path to traverse all street lanes in
 ---
 
 ## **🏛️ About the Project**
-This project is part of a **bachelor's thesis** at the **University of Tartu, Institute of Computer Science**. The primary goal is to develop a tool that models city street networks using graph theory, computes an **Eulerian path** for all connected street lanes, and outputs a path that is optimal for driving through all lanes efficiently. The results are intended for **geospatial visualization in QGIS** and practical applications in optimizing urban logistics.  
-
-While this project was primarily developed for academic purposes, it is publicly available, and contributions are welcome. However, future maintenance may be limited after the thesis defense.
+This project is part of a **bachelor's thesis** at the **University of Tartu, Institute of Computer Science**. The primary goal is to develop a tool that models city street networks using graph theory, computes an **Eulerian path** for all connected street lanes, and outputs a path that is optimal for driving through all lanes efficiently. The results are intended for **geospatial visualization in QGIS** and practical applications in optimizing urban logistics.
 
 ---
 
