@@ -6,7 +6,7 @@ import networkx as nx
 from shapely.geometry import shape
 from collections import defaultdict
 
-from models.intersection import Intersection
+from classes.intersection import Intersection
 
 
 def is_car_drivable(lane):
