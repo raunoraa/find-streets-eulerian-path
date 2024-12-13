@@ -11,7 +11,10 @@ from classes.intersection import Intersection
 
 def is_car_drivable(lane):
     """
-    Check if a given lane is car-drivable by evaluating forward or backward access permissions.
+    Determine if a lane is drivable based on its type.
+
+    This function checks the 'type' property within the 'properties' section of a GeoJSON lane feature. 
+    If the type is 'Driving', the lane is considered car-drivable.
 
     Args:
         lane (dict): A dictionary representing a lane feature from GeoJSON.
@@ -25,30 +28,7 @@ def is_car_drivable(lane):
 
         drivable = is_car_drivable(lane)
     """
-    # Check for 'backward' access permission if present
-    backward_access = (
-        lane.get("properties", {})
-        .get("muv", {})
-        .get("travel", {})
-        .get("backward", {})
-        .get("access", {})
-        .get("LandBased", [{}])[0]
-        .get("value", "No")
-    )
-
-    # Check for 'forward' access permission if present
-    forward_access = (
-        lane.get("properties", {})
-        .get("muv", {})
-        .get("travel", {})
-        .get("forward", {})
-        .get("access", {})
-        .get("LandBased", [{}])[0]
-        .get("value", "No")
-    )
-
-    # Return True if either access is 'Yes'
-    return backward_access == "Yes" or forward_access == "Yes"
+    return lane.get("properties", {}).get("type", "").lower() == "driving"
 
 
 def preprocess_lanes(lane_geojson, osm_dict):
