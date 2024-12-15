@@ -13,7 +13,7 @@ def is_car_drivable(lane):
     """
     Determine if a lane is drivable based on its type.
 
-    This function checks the 'type' property within the 'properties' section of a GeoJSON lane feature. 
+    This function checks the 'type' property within the 'properties' section of a GeoJSON lane feature.
     If the type is 'Driving', the lane is considered car-drivable.
 
     Args:
@@ -65,10 +65,15 @@ def preprocess_lanes(lane_geojson, osm_dict):
 
     for lane in lane_geojson["features"]:
         if is_car_drivable(lane):
-            osm_way_id = lane["properties"]["osm_way_ids"][0]
-            highway_tag_value = osm_dict[str(osm_way_id)]["highway"]
+            osm_way_ids = lane["properties"]["osm_way_ids"]
+            allowed_tag_present = False
+            for osm_way_id in osm_way_ids:
+                highway_tag_value = osm_dict[str(osm_way_id)]["highway"]
+                if highway_tag_value in allowed_tags:
+                    allowed_tag_present = True
+                    break
 
-            if highway_tag_value in allowed_tags:
+            if allowed_tag_present:
                 lane_data = {
                     "road_id": lane["properties"]["road"],
                     "lane_id": lane["properties"]["index"],
