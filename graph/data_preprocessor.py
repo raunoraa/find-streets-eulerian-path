@@ -52,6 +52,7 @@ def preprocess_lanes(lane_geojson, osm_dict):
 
     allowed_tags = {
         "motorway",
+        "motorway_link",
         "trunk",
         "trunk_link",
         "primary",
