@@ -51,6 +51,7 @@ def preprocess_lanes(lane_geojson, osm_dict):
     lanes_by_road_id = defaultdict(list)
 
     allowed_tags = {
+        "motorway",
         "trunk",
         "trunk_link",
         "primary",
