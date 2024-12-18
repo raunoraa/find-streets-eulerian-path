@@ -98,16 +98,21 @@ def create_graph(lanes, intersections):
             for l_node in leaving_nodes:
                 l_node_id, _, l_geometry = l_node
 
-                # Calculate the average coordinates and road distance between nodes
-                coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
-                intersection_road_distance = find_lane_distance(coords)
+                coords = [e_geometry, l_geometry]
+                # Flip latitude and longitude positions for find_lane_distance function
+                # It is necessary because geodesic expects them in different order
+                flipped_latlon_coords = [
+                    (e_geometry.y, e_geometry.x),
+                    (l_geometry.y, l_geometry.x),
+                ]
+                intersection_road_distance = find_lane_distance(flipped_latlon_coords)
 
                 # Skip backward turns in the main graph but allow in non-compulsory graph
                 if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
                     G_with_non_compulsory_edges.add_edge(
                         e_node_id,
                         l_node_id,
-                        geometry=LineString([e_geometry, l_geometry]),
+                        geometry=LineString(coords),
                         distance=intersection_road_distance,
                         edge_type="intersection",
                     )
@@ -116,14 +121,14 @@ def create_graph(lanes, intersections):
                 G.add_edge(
                     e_node_id,
                     l_node_id,
-                    geometry=LineString([e_geometry, l_geometry]),
+                    geometry=LineString(coords),
                     distance=intersection_road_distance,
                     edge_type="intersection",
                 )
                 G_with_non_compulsory_edges.add_edge(
                     e_node_id,
                     l_node_id,
-                    geometry=LineString([e_geometry, l_geometry]),
+                    geometry=LineString(coords),
                     distance=intersection_road_distance,
                     edge_type="intersection",
                 )
