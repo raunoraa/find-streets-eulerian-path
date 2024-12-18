@@ -148,7 +148,7 @@ def create_graph(lanes, intersections):
             lane_geometry = next(
                 (l["geometry"] for l in lanes[road_id] if l["lane_id"] == lane_id)
             )
-            #coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
+            
             flipped_coords = [
                 flipped_node_coords(G, id_tuple),
                 flipped_node_coords(G, node_one_id_tuple)
