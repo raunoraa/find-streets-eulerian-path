@@ -140,13 +140,13 @@ def create_graph(lanes, intersections):
         _, road_id, lane_id = id_tuple
         observable_tuple = (road_id, lane_id)
 
-        # We assume there are only two nodes per road in this context
+        # Use the knowledge that there can be only two nodes per lane 
         if observable_tuple in observables:
             node_one_id_tuple = observables.pop(observable_tuple)[0]
 
             # Retrieve the geometry of the lane
             lane_geometry = next(
-                (l["geometry"] for l in lanes[road_id] if l["lane_id"] == lane_id), None
+                (l["geometry"] for l in lanes[road_id] if l["lane_id"] == lane_id)
             )
             coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
             distance = find_lane_distance(coords)
