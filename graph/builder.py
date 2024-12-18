@@ -78,13 +78,11 @@ def create_graph(lanes, intersections):
                     node_id,
                     is_entering=is_entering_value,
                     geometry=int_node_geometry,
-                    intersection_id=id,
                 )
                 G_with_non_compulsory_edges.add_node(
                     node_id,
                     is_entering=is_entering_value,
                     geometry=int_node_geometry,
-                    intersection_id=id,
                 )
 
         intersections_node_map[id] = tuples
