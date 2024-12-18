@@ -8,7 +8,7 @@ from shapely.geometry import LineString
 from file_io.loader import load_geojson, load_osm_to_dict
 
 from geo_operations.geo_utils import (
-    get_closest_edge_midpoint,
+    get_closest_polygon_point,
     get_twonodes_average_coords,
     find_lane_distance,
 )
@@ -68,7 +68,7 @@ def create_graph(lanes, intersections):
                 ) or (lane["src_i"] == id and lane["direction"] == "Backward")
 
                 lane_geometry = lane.get("geometry")
-                int_node_geometry = get_closest_edge_midpoint(
+                int_node_geometry = get_closest_polygon_point(
                     lane_geometry, intersection.geometry
                 )
 

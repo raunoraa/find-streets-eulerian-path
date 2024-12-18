@@ -63,16 +63,16 @@ def get_twonodes_average_coords(G, start_node, end_node):
     return [avg_start, avg_end]
 
 
-def get_closest_edge_midpoint(polygon1, polygon2):
+def get_closest_polygon_point(polygon1, polygon2):
     """
-    Find the closest midpoint between the edges of two polygons.
+    Find the closest polygon point between the edges of two polygons.
 
     Args:
         polygon1 (shapely.geometry.Polygon): The first polygon.
         polygon2 (shapely.geometry.Polygon): The second polygon.
 
     Returns:
-        shapely.geometry.Point: The closest point between the two polygons.
+        shapely.geometry.Point: The closest point between the two polygons. First polygon's point will be returned.
 
     Example:
 
@@ -81,6 +81,7 @@ def get_closest_edge_midpoint(polygon1, polygon2):
         closest_point = get_closest_edge_midpoint(polygon1, polygon2)
     """
     min_distance = float("inf")
+    closest_point = None
 
     # Find the closest pair of vertices between polygon1 and polygon2 using geodesic distance
     for coord1 in polygon1.exterior.coords:
@@ -90,9 +91,9 @@ def get_closest_edge_midpoint(polygon1, polygon2):
                 coord1[::-1], coord2[::-1]
             ).meters  # Reverse coord1/coord2 for (lat, lon)
 
-            # Update the closest points if this pair is closer
+            # Update the closest point if this pair is closer
             if distance < min_distance:
                 min_distance = distance
-                closest_point1 = Point(coord1)
+                closest_point = Point(coord1)
 
-    return closest_point1
+    return closest_point
