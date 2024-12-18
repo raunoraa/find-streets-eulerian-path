@@ -150,9 +150,7 @@ def largest_strongly_connected_component(G):
 
         largest_component = largest_strongly_connected_component(G)
     """
-    components = list(nx.strongly_connected_components(G))
-    largest_component = max(components, key=lambda c: (len(c), G.subgraph(c).size()))
-    return G.subgraph(largest_component).copy()
+    return G.subgraph(max(nx.strongly_connected_components(G), key=len)).copy()
 
 
 def reduce_intersection_edges(G):
