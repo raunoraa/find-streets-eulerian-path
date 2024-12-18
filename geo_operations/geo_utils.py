@@ -29,38 +29,27 @@ def find_lane_distance(node_coords):
     return geodesic(start_node, next_node).meters
 
 
-def get_twonodes_average_coords(G, start_node, end_node):
+def flipped_node_coords(G, node):
     """
-    Calculate the average coordinates of two nodes in the graph.
+    Flip the coordinates of the node in the graph.
 
     Args:
         G (networkx.Graph): The graph object containing node data.
-        start_node (str): The identifier of the start node.
-        end_node (str): The identifier of the end node.
+        node (tuple): The identifier of the node.
 
     Returns:
-        list: A list containing two tuples, each representing the average (latitude, longitude) coordinates of the start and end nodes.
-            Example: [(lat1, lon1), (lat2, lon2)].
+        tuple: A tuple, which represents the flipped coordinates of the node (latitude, longitude) or (longitude, latitude), depending on how the input was given.        
 
     Example:
 
     ::
 
-        avg_coords = get_twonodes_average_coords(G, "start_node_id", "end_node_id")
+        flipped_coords = get_twonodes_average_coords(G, node)
     """
-    find_avg_coords = lambda coords: (
-        sum(y for _, y in coords) / len(coords),
-        sum(x for x, _ in coords) / len(coords),
-    )
-    start_node_data, end_node_data = G.nodes[start_node], G.nodes[end_node]
-    start_node_coords, end_node_coords = (
-        start_node_data.get("geometry").coords,
-        end_node_data.get("geometry").coords,
-    )
-    avg_start, avg_end = find_avg_coords(start_node_coords), find_avg_coords(
-        end_node_coords
-    )
-    return [avg_start, avg_end]
+    node_data = G.nodes[node]
+    coords = list(node_data.get("geometry").coords)[0]
+    flipped_coords = [coords[1], coords[0]]
+    return flipped_coords
 
 
 def get_closest_polygon_point(polygon1, polygon2):

@@ -9,7 +9,7 @@ from file_io.loader import load_geojson, load_osm_to_dict
 
 from geo_operations.geo_utils import (
     get_closest_polygon_point,
-    get_twonodes_average_coords,
+    flipped_node_coords,
     find_lane_distance,
 )
 
@@ -101,11 +101,11 @@ def create_graph(lanes, intersections):
                 coords = [e_geometry, l_geometry]
                 # Flip latitude and longitude positions for find_lane_distance function
                 # It is necessary because geodesic expects them in different order
-                flipped_latlon_coords = [
-                    (e_geometry.y, e_geometry.x),
-                    (l_geometry.y, l_geometry.x),
+                flipped_coords = [
+                    flipped_node_coords(G, e_node_id),
+                    flipped_node_coords(G, l_node_id)
                 ]
-                intersection_road_distance = find_lane_distance(flipped_latlon_coords)
+                intersection_road_distance = find_lane_distance(flipped_coords)
 
                 # Skip backward turns in the main graph but allow in non-compulsory graph
                 if e_node_id[0] == l_node_id[0] and e_node_id[1] == l_node_id[1]:
@@ -148,8 +148,12 @@ def create_graph(lanes, intersections):
             lane_geometry = next(
                 (l["geometry"] for l in lanes[road_id] if l["lane_id"] == lane_id)
             )
-            coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
-            distance = find_lane_distance(coords)
+            #coords = get_twonodes_average_coords(G, id_tuple, node_one_id_tuple)
+            flipped_coords = [
+                flipped_node_coords(G, id_tuple),
+                flipped_node_coords(G, node_one_id_tuple)
+            ]
+            distance = find_lane_distance(flipped_coords)
 
             # Add edge depending on entering status
             if not node_data["is_entering"]:
