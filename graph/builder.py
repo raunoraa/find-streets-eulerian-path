@@ -73,7 +73,7 @@ def create_graph(lanes, intersections):
                 )
 
                 # Add the node to the graph
-                tuples.add((node_id, is_entering_value, int_node_geometry, id))
+                tuples.add((node_id, is_entering_value, int_node_geometry))
                 G.add_node(
                     node_id,
                     is_entering=is_entering_value,
@@ -94,9 +94,9 @@ def create_graph(lanes, intersections):
 
         # Add edges between entering and leaving nodes
         for e_node in entering_nodes:
-            e_node_id, _, e_geometry, _ = e_node
+            e_node_id, _, e_geometry = e_node
             for l_node in leaving_nodes:
-                l_node_id, _, l_geometry, _ = l_node
+                l_node_id, _, l_geometry = l_node
 
                 # Calculate the average coordinates and road distance between nodes
                 coords = get_twonodes_average_coords(G, e_node_id, l_node_id)
