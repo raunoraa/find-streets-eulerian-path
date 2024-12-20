@@ -155,7 +155,7 @@ def calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus):
     # If the graph is small, avoid parallelization
     if num_workers >= len(deficit_node_list):
         print("Using serial solution")
-        for deficit_node in deficit.keys():
+        for deficit_node in deficit_node_list:
             distances_single_source, paths_single_source = nx.single_source_dijkstra(
                 G_with_non_compulsory_edges, source=deficit_node, weight="distance"
             )
