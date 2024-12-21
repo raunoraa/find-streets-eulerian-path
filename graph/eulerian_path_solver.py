@@ -20,7 +20,7 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
         initial_graph (networkx.DiGraph): The original graph to be modified.
 
     Returns:
-        tuple: The last observed surplus node.
+        tuple: The last observed surplus node ID.
     """
     surplus_node = None
 
