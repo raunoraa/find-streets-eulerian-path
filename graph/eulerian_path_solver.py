@@ -34,7 +34,7 @@ def balance_graph(G, surplus, deficit, G_with_non_compulsory_edges, initial_grap
         surplus_mapping,
     ) = calculate_cost_matrix(G_with_non_compulsory_edges, deficit, surplus)
 
-    # Use the Hungarian algorithm to find the optimal assignment
+    # Use the scipy's solution to find the optimal assignment
     deficit_indices, surplus_indices = linear_sum_assignment(cost_matrix)
 
     # Iterate through the optimal matches
