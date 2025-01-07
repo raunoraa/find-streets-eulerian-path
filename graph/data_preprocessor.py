@@ -63,6 +63,9 @@ def preprocess_lanes(lane_geojson, osm_dict):
         "tertiary_link",
         "residential",
         "unclassified",
+        "living_street",
+        "service",
+        "track",
     }
 
     for lane in lane_geojson["features"]:
