@@ -107,7 +107,7 @@ You can find the examples in this [Google Drive folder](https://drive.google.com
 ---
 
 ## **🤝 Contributing**
-While this repository is publicly available, contributions are not accepted until I have defended my thesis.
+Contributions are accepted from now on, since I've successfully defended my thesis.
 
 ---
 
